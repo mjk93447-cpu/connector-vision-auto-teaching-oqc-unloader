@@ -9,8 +9,8 @@ on:
       - "run_pin_gui.py"
       - "requirements-pin.txt"
       - ".github/workflows/build-pin-exe.yml"
-  tags:
-    - "pin-v*"
+    tags:
+      - "pin-v*"
 
 jobs:
   build:
