@@ -20,7 +20,7 @@ from sobel_edge_detection import (
     compute_boundary_optimized_score,
     _count_components_mask,
 )
-from edge_performance_eval import evaluate_edges, dilate, compute_boundary
+from tools_scripts.edge_performance_eval import evaluate_edges, dilate, compute_boundary
 
 # 루프별로 조정할 boundary score 가중치 (전략 도출 후 반영)
 BOUNDARY_SCORE_WEIGHTS = {

@@ -9,8 +9,6 @@ on:
       - "requirements-dev.txt"
       - ".github/workflows/build-windows-exe.yml"
       - "test_smoke.py"
-      - "download_exe.bat"
-      - "VERSION"
     tags:
       - "v*"
 

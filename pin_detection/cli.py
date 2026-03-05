@@ -1,0 +1,110 @@
+"""
+CLI for pin detection: train and inference.
+"""
+import argparse
+from pathlib import Path
+
+from .inference import run_inference, split_upper_lower, compute_spacing_mm
+from .excel_io import load_excel_format, write_result_excel
+
+
+def _run_gui() -> int:
+    from .gui import main
+    main()
+    return 0
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    from .train import train_pin_model
+    if args.unmasked_dir and args.masked_dir:
+        model_path = train_pin_model(
+            unmasked_dir=args.unmasked_dir,
+            masked_dir=args.masked_dir,
+            excel_path=args.excel,
+            output_dir=args.output_dir,
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+        )
+    elif args.unmasked and args.masked:
+        model_path = train_pin_model(
+            unmasked_path=args.unmasked,
+            masked_path=args.masked,
+            excel_path=args.excel,
+            output_dir=args.output_dir,
+            epochs=args.epochs,
+            imgsz=args.imgsz,
+        )
+    else:
+        raise SystemExit("Use --unmasked/--masked or --unmasked-dir/--masked-dir")
+    print(f"Model saved: {model_path}")
+    return 0
+
+
+def cmd_inference(args: argparse.Namespace) -> int:
+    img, detections, masked = run_inference(
+        model_path=args.model,
+        image_path=args.image,
+        output_image_path=args.output_image,
+        conf_threshold=args.conf,
+    )
+    h, w = img.shape[:2]
+    upper, lower = split_upper_lower(detections)
+    upper_spacings = compute_spacing_mm(upper, w)
+    lower_spacings = compute_spacing_mm(lower, w)
+
+    print(f"Upper pins: {len(upper)}, Lower pins: {len(lower)}")
+    print(f"Judgment: {'OK' if len(upper) == 20 and len(lower) == 20 else 'NG'}")
+
+    format_ref = None
+    if args.excel_format:
+        format_ref = load_excel_format(args.excel_format)
+
+    excel_out = args.output_excel or (Path(args.image).parent / "result.xlsx")
+    write_result_excel(
+        excel_out,
+        upper_count=len(upper),
+        lower_count=len(lower),
+        upper_spacings=upper_spacings,
+        lower_spacings=lower_spacings,
+        format_ref=format_ref,
+    )
+    print(f"Excel saved: {excel_out}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Connector pin detection (YOLO26)")
+    sub = parser.add_subparsers(dest="cmd", help="Command")
+
+    train_p = sub.add_parser("train", help="Train from masked/unmasked pair(s) + Excel")
+    train_p.add_argument("--unmasked", help="Unmasked image (single pair)")
+    train_p.add_argument("--masked", help="Masked image (single pair)")
+    train_p.add_argument("--unmasked-dir", dest="unmasked_dir", help="Dir with 10 unmasked images")
+    train_p.add_argument("--masked-dir", dest="masked_dir", help="Dir with 10 masked images")
+    train_p.add_argument("--excel", help="Reference Excel or dir (format)")
+    train_p.add_argument("--output-dir", default="pin_models", help="Output directory")
+    train_p.add_argument("--epochs", type=int, default=100)
+    train_p.add_argument("--imgsz", type=int, default=640)
+    train_p.set_defaults(func=cmd_train)
+
+    gui_p = sub.add_parser("gui", help="Launch GUI (train/inference)")
+    gui_p.set_defaults(func=lambda a: _run_gui())
+
+    inf_p = sub.add_parser("inference", help="Run inference on image")
+    inf_p.add_argument("--model", required=True, help="Trained model .pt path")
+    inf_p.add_argument("--image", required=True, help="Input connector image")
+    inf_p.add_argument("--output-image", help="Output masked image path")
+    inf_p.add_argument("--output-excel", help="Output Excel path")
+    inf_p.add_argument("--excel-format", help="Reference Excel for format (from training)")
+    inf_p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
+    inf_p.set_defaults(func=cmd_inference)
+
+    args = parser.parse_args()
+    if not args.cmd:
+        parser.print_help()
+        return 0
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,121 +1,84 @@
-# Edge — Sobel Edge Batch Processor (ver20)
+# Connector Vision Auto Teaching for OQC Unloader Machine
 
-OLED FCB 측면 이미지의 외곽 경계를 추출하는 **오프라인 GUI 배치 처리** 도구입니다.  
-Cursor IDE 및 일반 Python 환경에서 바로 실행·개발할 수 있습니다.
-
----
-
-## 빠른 실행 (Cursor / 로컬)
-
-```bash
-# 가상환경 권장
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-# source .venv/bin/activate  # macOS/Linux
-
-pip install numpy pillow
-python sobel_edge_detection.py
-```
-
-- **필수**: Python 3.8+, `numpy`, `pillow`
-- **tkinter**: Python 기본 내장 (별도 설치 불필요)
+OQC 언로더 장비용 **커넥터 핀·몰드 위치 자동 티칭** 프로그램입니다.  
+제품 기종마다 커넥터 크기와 생김세가 달라서 매번 수동으로 하던 사전 teaching 과정을 자동화합니다.
 
 ---
 
-## Cursor에서 개발할 때
+## 목적
 
-| 항목 | 설명 |
+- **핵심 기능**: connector의 pin과 mold의 정확한 위치를 자동으로 찾아주는 프로그램에서, 제품 기종별로 다른 커넥터에 대해 **사전 teaching을 자동화**하는 Auto Teaching 프로그램.
+- **배경**: 기존에는 제품 기종이 바뀔 때마다 커넥터 크기/형상이 달라져 teaching을 새로 해야 했음 → 이를 자동화하여 OQC unloader machine에 적용.
+
+## 1차 목표
+
+- **산출물**: 커넥터 탑뷰 이미지 → **핀 개수**·**핀 간 좌우간격**·**마스킹 이미지** — **오프라인 Windows EXE**.
+- **범위**: 독립 실행형. 기존 OQC 비전 모듈 연동은 다음 과제.
+
+### 아키텍처
+
+- **YOLO26** 기반 (소형 객체 탐지). 1회 로컬 학습 후 추가 티칭 없음.
+
+### 입출력
+
+| 구분 | 내용 |
 |------|------|
-| **실행** | 터미널에서 `python sobel_edge_detection.py` 또는 Run/Debug 사용 |
-| **테스트** | `python -m pytest test_smoke.py` 또는 `python test_smoke.py` |
-| **성능 평가** | `python edge_performance_eval.py` (합성 이미지 스트레스 테스트) |
-| **문서** | `FORMAL_DOCUMENTATION.md`(요구사항/아키텍처), `DEVELOPMENT_NOTES.md`(이력/의사결정) |
-| **버전** | GUI 타이틀 및 `FORMAL_DOCUMENTATION.md`에 ver20 기준 반영 |
+| **학습 (1회)** | 마스킹 전/후 사진, 엑셀(위/아래 핀 개수, OK/NG, 좌우간격) |
+| **추론** | 마스킹 없는 사진 → 마스킹 이미지, 엑셀(핀 개수, OK/NG, 좌우간격) |
+| **판정** | 위 20개·아래 20개 → OK, 그 외 → NG |
+| **가정** | 핀 좌우 길이 0.5mm 고정 |
+
+### 상세 사양
+
+- **SPEC_1ST_GOAL.md** 참고.
 
 ---
 
-## 사용 흐름
+## 프로젝트 구조 (Fork from Edge)
 
-1. **파일 추가**: 최대 100장 이미지 선택
-2. **출력 폴더**: 필요 시 폴더 변경
-3. **Auto Optimize** (선택): 스코어 기반 자동 파라미터 탐색 후 **처리 시작**
+이 저장소는 에지 디텍터(Edge) 프로젝트를 포크하여, 비전/위치 검출·파라미터 자동 탐색 등 유사 기능을 활용할 수 있도록 구성되어 있습니다.
 
-### Auto 모드 (ver20)
-
-- **Fast**: 서브셋 이미지, 빠른 탐색
-- **Precise**: 전체 이미지, refine + adaptive
-- **Perfect**: 중요 파라미터 2~10배 촘촘한 그리드, ~5배 시간, coordinate descent (동일 score 함수)
-
-### 스코어 표시 (ver20)
-
-- **scaled** (기본): 스코어 ×10¹⁵ 표시
-- **log10**: log₁₀(score)
-- **raw**: 원시 스코어 (지수 형태로 표시하여 정확히 확인 가능)  
-→ 최적화/학습 알고리즘은 항상 원시 스코어만 사용합니다.
+- **개발 환경**: Python 3.8+, Cursor IDE 권장
+- **문서**: `FORMAL_DOCUMENTATION.md`, `DEVELOPMENT_NOTES.md` 스타일 유지
+- **실행/테스트**: 기존 Edge 스크립트 참고 후, Auto Teaching 전용 진입점으로 단계적 전환 예정
 
 ---
 
-## 출력 규칙
-
-- 출력 디렉터리: 선택한 폴더 아래 `edge_results_YYYYMMDD_HHMMSS`
-- 이미지당 생성 파일:
-  - `원본이름_edges_green.png`: 에지 점(초록) 오버레이
-  - `원본이름_edge_coords.txt`: 에지 좌표
-
-`edge_coords.txt` 형식:
-
-```
-# x,y
-10,25
-11,25
-...
-```
-
----
-
-## 성능 평가 (합성 이미지)
+## 빠른 시작
 
 ```bash
-python edge_performance_eval.py
+python -m venv .venv
+.venv\Scripts\activate
+pip install numpy pillow
+python sobel_edge_detection.py   # GUI 실행
+python tools.py --help           # eval, tune, benchmark 등 CLI 도구
 ```
 
-- 출력: `outputs/perf_eval_YYYYMMDD_HHMMSS/`  
-  (입력/마스크/에지/메트릭 등)
-
----
-
-## GPU 가속 (NVIDIA RTX 2070 Super 등)
-
-- **설치**: `pip install cupy-cuda12x` (CUDA 12) 또는 `cupy-cuda11x` (CUDA 11)
-- **GUI**: Parameter Settings → "GPU acceleration" 체크박스 활성화
-- **효과**: Auto optimization의 edge detection 단계 가속 (CuPy 기반 Sobel/블러/NMS)
-- **벤치마크**: `python gpu_benchmark.py` — 합성 이미지로 CPU vs GPU 속도 측정
-
----
-
-## EXE 빌드 (오프라인 배포)
+### 1차 목표 (핀 자동 마스킹)
 
 ```bash
-pip install -r requirements-dev.txt
-pyinstaller --onefile --windowed --name edge_batch_gui sobel_edge_detection.py
+pip install -r requirements-pin.txt
+# GUI 실행 (학습/추론)
+python tools.py pin gui
+# 학습 (10쌍)
+python tools.py pin train --unmasked-dir ./unmasked --masked-dir ./masked
+# 추론
+python tools.py pin inference --model pin_models/.../best.pt --image new.jpg
 ```
 
-- 결과: `dist/edge_batch_gui.exe` (Windows)
-
-### GitHub Actions / Releases
-
-- **Actions** → **Build Windows EXE** → **Run workflow**  
-  - 완료 후 **Artifacts**에서 `edge_batch_gui_windows` 다운로드
-- **릴리스 EXE 다운로드 (ver20)**  
-  - 저장소에서 태그 `v20` 푸시 시 자동으로 [Releases](https://github.com/mjk93447-cpu/Edge/releases)에 exe가 올라갑니다.  
-  - **배치 파일**: 프로젝트 루트의 `download_exe.bat` 실행 시 `edge_batch_gui.exe`를 현재 폴더로 받습니다.  
-    - 기본: `v20`  
-    - 다른 버전: `download_exe.bat v19` 처럼 인자로 태그 지정
-
 ---
+
+## 배포
+
+- **테스트**: `run_tests.bat` 또는 `python -m unittest discover`
+- **푸시**: `push_all.bat` (테스트 → 커밋 → 푸시)
+- **Edge EXE**: `release_ver20.bat` → 태그 v20 → Releases
+- **Pin EXE**: `release_pin.bat` → 태그 pin-v1 → Releases. 또는 push 시 Actions → Artifacts
 
 ## 문서
 
-- **FORMAL_DOCUMENTATION.md**: 시스템 개요, 요구사항, 변경 이력 (v20)
-- **DEVELOPMENT_NOTES.md**: 개발 이력, 시행착오, 제한사항
-- **PROJECT_ASSESSMENT.md**: 서브시스템 성숙도 및 개선 백로그
+- **ROADMAP.md**: 중장기 개발 계획
+- **SPEC_1ST_GOAL.md**: 1차 목표 상세 사양 (YOLO26 핀 자동 마스킹)
+- **AGENTS.md**: 에이전트/개발 가이드
+- **FORMAL_DOCUMENTATION.md**, **DEVELOPMENT_NOTES.md**: 요구사항·아키텍처·이력 (Edge 포크)
+- **INSIGHTS.md**: 분석·평가·튜닝 결과 통합

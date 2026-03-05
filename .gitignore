@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE / Editor
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# Project outputs
+outputs/
+boundary_score_eval_out/
+gpu_benchmark_out/
+score_penalty_analysis_out/
+
+# Pin detection
+pin_models/
+
+# Test / eval artifacts
+test_images_auto/
+automated_test_results_*.json
+baseline_results.json
+fast_target_score_loop_results.json
+target_tuning_results_*.json
+target_score_strategy_config.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MCP (never commit tokens)
+.cursor/token_out.txt
+.cursor/.gh_token
+.cursor/.gh_err

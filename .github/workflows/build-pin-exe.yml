@@ -1,0 +1,66 @@
+name: Build Pin Detection EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "pin_detection/**"
+      - "run_pin_gui.py"
+      - "requirements-pin.txt"
+      - ".github/workflows/build-pin-exe.yml"
+  tags:
+    - "pin-v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pillow openpyxl scipy
+          pip install -r requirements-pin.txt
+          pip install pyinstaller
+
+      - name: Run pin_detection import test
+        run: python -c "from pin_detection.gui import main; print('OK')"
+
+      - name: Build EXE
+        shell: cmd
+        run: |
+          pyinstaller --onefile --windowed ^
+            --name pin_detection_gui ^
+            --hidden-import=ultralytics ^
+            --hidden-import=PIL._tkinter_finder ^
+            --collect-all=ultralytics ^
+            --collect-all=numpy ^
+            --collect-all=PIL ^
+            run_pin_gui.py
+
+      - name: Upload artifact
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: pin_detection_gui_windows
+          path: dist/pin_detection_gui.exe
+
+      - name: Create Release and upload EXE
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/pin_detection_gui.exe
+          generate_release_notes: false
+          body: "Pin Detection GUI (YOLO26) - Prototype. Tag: ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
