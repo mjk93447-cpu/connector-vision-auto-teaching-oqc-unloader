@@ -65,6 +65,27 @@ def prepare_yolo_dataset(
     return data_yaml
 
 
+def get_dataset_info(data_yaml: Path) -> dict:
+    """Return n_images, img_w, img_h from dataset."""
+    from PIL import Image
+    data_yaml = Path(data_yaml)
+    base = data_yaml.parent
+    img_dir = base / "images" / "train"
+    if not img_dir.exists():
+        return {"n_images": 0, "img_w": 0, "img_h": 0}
+    files = [f for f in img_dir.iterdir() if f.suffix.lower() in IMG_EXTS]
+    n = len(files)
+    w, h = 0, 0
+    if files:
+        try:
+            im = Image.open(files[0])
+            w, h = im.size
+            im.close()
+        except Exception:
+            pass
+    return {"n_images": n, "img_w": w, "img_h": h}
+
+
 def _find_masked_pair(unmasked_path: Path, masked_dir: Path) -> Path:
     """Find masked file for unmasked (same name or stem_masked.suffix)."""
     m = masked_dir / unmasked_path.name

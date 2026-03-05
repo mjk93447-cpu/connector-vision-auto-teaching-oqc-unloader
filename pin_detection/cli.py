@@ -24,6 +24,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             output_dir=args.output_dir,
             epochs=args.epochs,
             imgsz=args.imgsz,
+            workers=args.workers,
         )
     elif args.unmasked and args.masked:
         model_path = train_pin_model(
@@ -33,6 +34,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             output_dir=args.output_dir,
             epochs=args.epochs,
             imgsz=args.imgsz,
+            workers=args.workers,
         )
     else:
         raise SystemExit("Use --unmasked/--masked or --unmasked-dir/--masked-dir")
@@ -85,6 +87,7 @@ def main() -> int:
     train_p.add_argument("--output-dir", default="pin_models", help="Output directory")
     train_p.add_argument("--epochs", type=int, default=100)
     train_p.add_argument("--imgsz", type=int, default=640)
+    train_p.add_argument("--workers", type=int, default=None, help="Data loading workers (default: cpu_count)")
     train_p.set_defaults(func=cmd_train)
 
     gui_p = sub.add_parser("gui", help="Launch GUI (train/inference)")
