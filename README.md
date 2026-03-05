@@ -73,7 +73,7 @@ python tools.py pin inference --model pin_models/.../best.pt --image new.jpg
 - **테스트**: `run_tests.bat` 또는 `python -m unittest discover`
 - **푸시**: `push_all.bat` (테스트 → 커밋 → 푸시)
 - **Edge EXE**: `release_ver20.bat` → 태그 v20 → Releases
-- **Pin EXE**: `release_pin.bat` → 태그 pin-v1 → Releases. 또는 push 시 Actions → Artifacts
+- **Pin EXE**: `release_pin.bat` → 태그 pin-v1 → Releases. 또는 Actions → Artifacts. [DOWNLOAD_EXE.md](DOWNLOAD_EXE.md)
 
 ## 문서
 
