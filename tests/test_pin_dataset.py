@@ -276,7 +276,7 @@ class TestROI(unittest.TestCase):
             self.assertGreater(cropped.shape[1], 60)
 
     def test_prepare_from_dirs_large_uses_roi(self):
-        """5496x3672-like: ROI crop should produce smaller dataset images."""
+        """5496x3672-like: ROI crop should produce smaller dataset images (min 30%w, 10%h)."""
         from pin_detection.dataset import prepare_yolo_dataset_from_dirs
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -296,8 +296,11 @@ class TestROI(unittest.TestCase):
             self.assertTrue(out_img.exists())
             with Image.open(out_img) as im:
                 w, h = im.size
-            self.assertLess(w, 500)
-            self.assertLess(h, 500)
+            # ROI min: 30% width (750), 10% height (250). Output smaller than full 2500x2500.
+            self.assertLess(w, 2500)
+            self.assertLess(h, 2500)
+            self.assertGreaterEqual(w, 750)
+            self.assertGreaterEqual(h, 250)
 
     def test_roi_preserves_all_pins(self):
         """ROI crop must not lose any pins (40-pin connector)."""

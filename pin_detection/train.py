@@ -27,6 +27,10 @@ def train_pin_model(
     workers: int | None = None,
     val_split: float = 0.2,
     stop_event: threading.Event | None = None,
+    batch: int = 16,
+    cache: str | bool = True,
+    mosaic: float = 0.0,
+    rect: bool = True,
 ) -> Path:
     """
     Train pin detection model.
@@ -62,11 +66,16 @@ def train_pin_model(
         model.add_callback("on_train_epoch_end", _on_epoch_end)
 
     # Recall: 20+20 pins must not be missed. Precision: no over-detection.
+    # Speed: batch, cache, mosaic=0, rect=True, plots=False for faster training.
     results = model.train(
         data=str(data_yaml),
         epochs=epochs,
         imgsz=imgsz,
         workers=n_workers,
+        batch=batch,
+        cache=cache,
+        rect=rect,
+        plots=False,
         project=str(output_dir),
         name="pin_run",
         exist_ok=True,
@@ -78,8 +87,8 @@ def train_pin_model(
         translate=0.05,
         scale=0.3,
         fliplr=0.5,
-        mosaic=0.5,  # 소형 객체: mosaic 낮춰 localization 정확도 유지
-        copy_paste=0.1,  # 소형 객체 증강
+        mosaic=mosaic,
+        copy_paste=0.0 if mosaic == 0 else 0.1,
     )
 
     best_pt = Path(results.save_dir) / "weights" / "best.pt"
