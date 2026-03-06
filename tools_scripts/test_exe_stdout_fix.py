@@ -5,37 +5,40 @@ Simulates: sys.stdout=None, sys.stderr=None before import.
 import os
 import sys
 
+# Ensure project root in path (CI may run from different cwd)
+_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+os.chdir(_root)
+
 
 def test_stdout_stderr_fix():
     """Simulate EXE: set stdout/stderr to None, then import run_pin_gui.
     Should not raise AttributeError."""
-    # Save originals
     orig_stdout = sys.stdout
     orig_stderr = sys.stderr
     try:
         sys.stdout = None
         sys.stderr = None
-        # This would normally crash when ultralytics tries to write
-        # run_pin_gui fixes this at import time
         import run_pin_gui  # noqa: F401
-        # If we get here without crash, fix is applied
-        assert sys.stdout is not None, "stdout should be replaced"
-        assert sys.stderr is not None, "stderr should be replaced"
-        return 0
-    except AttributeError as e:
-        return 1
+        if sys.stdout is None or sys.stderr is None:
+            return 1, "stdout/stderr not replaced by run_pin_gui"
+        return 0, None
+    except AttributeError:
+        return 1, "AttributeError when stdout/stderr are None"
+    except Exception as e:
+        return 1, str(e)
     finally:
         sys.stdout = orig_stdout
         sys.stderr = orig_stderr
 
 
 def main():
-    code = test_stdout_stderr_fix()
-    # stdout restored in test's finally
+    code, msg = test_stdout_stderr_fix()
     if code == 0:
         print("OK: run_pin_gui handles None stdout/stderr")
     else:
-        print("FAIL: AttributeError when stdout/stderr are None")
+        print(f"FAIL: {msg or 'unknown'}")
     return code
 
 

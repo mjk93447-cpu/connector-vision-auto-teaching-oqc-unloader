@@ -9,6 +9,7 @@ on:
       - "run_pin_gui.py"
       - "requirements-pin.txt"
       - "pin_detection_gui.spec"
+      - "tools_scripts/**"
       - ".github/workflows/build-pin-exe.yml"
     tags:
       - "pin-v*"
@@ -41,6 +42,7 @@ jobs:
         run: python -c "from pin_detection.gui import main; print('OK')"
       - name: Test EXE stdout fix (NoneType write)
         run: python tools_scripts/test_exe_stdout_fix.py
+        working-directory: ${{ github.workspace }}
 
       - name: Download yolo26n.pt for offline bundle
         run: python -c "from pathlib import Path; from ultralytics.utils.downloads import attempt_download_asset; Path('models').mkdir(exist_ok=True); attempt_download_asset(Path('models')/'yolo26n.pt')"
