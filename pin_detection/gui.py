@@ -146,7 +146,7 @@ class PinDetectionGUI:
         self.excel_dir = tk.StringVar()
         self.model_path = tk.StringVar()
         self.output_dir = tk.StringVar(value="pin_models")
-        self.epochs_var = tk.IntVar(value=100)
+        self.epochs_var = tk.IntVar(value=3)
         self.imgsz_var = tk.IntVar(value=640)
         self._imgsz_max = 1280
         self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 4))  # cap 4 for Windows stability
@@ -209,6 +209,13 @@ class PinDetectionGUI:
         ttk.Label(train_f, text="(0.1–0.3 typical)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
 
+        ttk.Label(train_f, text="Mosaic aug:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.mosaic_var = tk.DoubleVar(value=0.0)
+        sb_mosaic = ttk.Spinbox(train_f, from_=0.0, to=1.0, increment=0.1, textvariable=self.mosaic_var, width=8)
+        sb_mosaic.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
+        ttk.Label(train_f, text="(0=fast, 0.5=quality)").grid(row=row, column=2, sticky=tk.W, pady=2)
+        row += 1
+
         # Hardware & ETA
         ttk.Label(train_f, text="CPU:").grid(row=row, column=0, sticky=tk.W, pady=2)
         self.cpu_label = ttk.Label(train_f, text=_get_cpu_info())
@@ -242,10 +249,23 @@ class PinDetectionGUI:
         self.train_status.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=2)
         row += 1
 
-        # Graph frame
-        graph_f = ttk.LabelFrame(train_f, text="Training metrics")
+        # Graph frame + Training log
+        graph_f = ttk.LabelFrame(train_f, text="Training metrics & log")
         graph_f.grid(row=row, column=0, columnspan=3, sticky=tk.NSEW, pady=8)
-        self.graph_frame = graph_f
+        graph_f.columnconfigure(0, weight=1)
+        graph_f.rowconfigure(0, weight=1)
+        graph_f.rowconfigure(1, weight=0)
+        self.graph_frame = ttk.Frame(graph_f)  # Canvas goes here (children cleared on poll)
+        self.graph_frame.grid(row=0, column=0, sticky=tk.NSEW)
+        # Log text (epoch progress, ETA)
+        log_f = ttk.Frame(graph_f)
+        log_f.grid(row=1, column=0, sticky=tk.EW, padx=4, pady=2)
+        log_f.columnconfigure(0, weight=1)
+        self.train_log_text = tk.Text(log_f, height=5, wrap=tk.WORD, font=("Consolas", 9), state=tk.DISABLED)
+        log_scroll = ttk.Scrollbar(log_f, command=self.train_log_text.yview)
+        self.train_log_text.config(yscrollcommand=log_scroll.set)
+        self.train_log_text.grid(row=0, column=0, sticky=tk.NSEW)
+        log_scroll.grid(row=0, column=1, sticky=tk.NS)
         row += 1
 
         btn_f = ttk.Frame(train_f)
@@ -356,9 +376,10 @@ class PinDetectionGUI:
                 suggested = analyze_dataset_for_training(pu, pm, max_samples=5)
                 self._suggested = suggested
                 imgsz = suggested.get("imgsz", 640)
-                epochs = suggested.get("epochs", 100)
+                epochs = suggested.get("epochs", 3)
+                mosaic = suggested.get("mosaic", 0.0)
                 note = suggested.get("note", "")
-                self.suggested_label.config(text=f"imgsz:{imgsz}, epochs:{epochs}" + (f" ({note})" if note else ""))
+                self.suggested_label.config(text=f"imgsz:{imgsz}, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
                 self.apply_suggested_btn.config(state=tk.NORMAL)
             except Exception:
                 self._suggested = None
@@ -384,8 +405,9 @@ class PinDetectionGUI:
         s = self._suggested
         imgsz = min(s.get("imgsz", 640), getattr(self, "_imgsz_max", 1280))
         self.imgsz_var.set(imgsz)
-        self.epochs_var.set(s.get("epochs", 100))
+        self.epochs_var.set(s.get("epochs", 3))
         self.val_split_var.set(s.get("val_split", 0.2))
+        self.mosaic_var.set(s.get("mosaic", 0.0))
         self._update_eta()
 
     def _on_train(self):
@@ -416,7 +438,7 @@ class PinDetectionGUI:
                     val_split = max(0.01, min(0.5, val_split))
                 except Exception:
                     val_split = 0.2
-                data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split)
+                data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split, use_roi=False)
 
                 # Start graph poll in main thread
                 save_dir = Path(out_dir) / "pin_run"
@@ -434,6 +456,11 @@ class PinDetectionGUI:
                         "Image size capped",
                         "imgsz capped at 1280 for stable training. Larger values can cause very long runs."
                     ))
+                try:
+                    mosaic_val = float(self.mosaic_var.get())
+                    mosaic_val = max(0.0, min(1.0, mosaic_val))
+                except Exception:
+                    mosaic_val = 0.0
                 model_path = train_pin_model(
                     unmasked_dir=u,
                     masked_dir=m,
@@ -443,6 +470,7 @@ class PinDetectionGUI:
                     workers=workers,
                     val_split=val_split,
                     stop_event=self._train_stop,
+                    mosaic=mosaic_val,
                 )
 
                 self.root.after(0, lambda: self._stop_graph_poll())
@@ -466,8 +494,9 @@ class PinDetectionGUI:
         self.train_status.config(text="Stopping at end of epoch...")
 
     def _start_graph_poll(self, save_dir: Path):
-        """Poll results.csv and update graph."""
+        """Poll results.csv and update graph + log."""
         self._graph_data = []
+        self._graph_start_time = time.time()
         try:
             import matplotlib
             matplotlib.use("TkAgg")
@@ -482,26 +511,65 @@ class PinDetectionGUI:
             self._graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         except ImportError:
             self._graph_canvas = None
-            return
         self._graph_save_dir = save_dir
         self._graph_poll_id = None
+        self._last_logged_epoch = -1
+        self._update_train_log("Preparing dataset...", clear=True)
         self._poll_graph()
 
+    def _update_train_log(self, msg: str, clear: bool = False):
+        """Append to training log text (thread-safe via root.after)."""
+        def _do():
+            t = getattr(self, "train_log_text", None)
+            if t:
+                t.config(state=tk.NORMAL)
+                if clear:
+                    t.delete("1.0", tk.END)
+                t.insert(tk.END, msg + "\n")
+                t.see(tk.END)
+                t.config(state=tk.DISABLED)
+        self.root.after(0, _do)
+
     def _poll_graph(self):
-        if not getattr(self, "_graph_canvas", None):
-            return
-        csv_path = self._graph_save_dir / "results.csv"
-        if csv_path.exists():
-            try:
-                import csv
-                with open(csv_path) as f:
-                    r = csv.DictReader(f)
-                    rows = list(r)
-                if rows:
-                    self._graph_data = rows
-                    self._draw_graph()
-            except Exception:
-                pass
+        csv_path = getattr(self, "_graph_save_dir", None)
+        if csv_path:
+            csv_path = csv_path / "results.csv"
+            if csv_path.exists():
+                try:
+                    import csv
+                    with open(csv_path) as f:
+                        r = csv.DictReader(f)
+                        rows = list(r)
+                    if rows:
+                        self._graph_data = rows
+                        if getattr(self, "_graph_canvas", None):
+                            self._draw_graph()
+                        # Update log: latest epoch, ETA (only when epoch changes)
+                        last = rows[-1]
+                        ep = int(last.get("epoch", len(rows)))
+                        if ep != getattr(self, "_last_logged_epoch", -1):
+                            self._last_logged_epoch = ep
+                            box = last.get("train/box_loss") or last.get("train_box_loss") or ""
+                            prec = last.get("metrics/precision(B)") or last.get("metrics_precision(B)") or ""
+                            rec = last.get("metrics/recall(B)") or last.get("metrics_recall(B)") or ""
+                            epochs_total = 3
+                            try:
+                                epochs_total = int(self.epochs_var.get())
+                            except Exception:
+                                pass
+                            eta = ""
+                            try:
+                                elapsed = time.time() - getattr(self, "_graph_start_time", time.time())
+                                if ep > 0 and elapsed > 0:
+                                    sec_per_ep = elapsed / ep
+                                    remaining = (epochs_total - ep) * sec_per_ep
+                                    eta = f"ETA ~{int(remaining)}s"
+                            except Exception:
+                                pass
+                            log_line = f"Epoch {ep}/{epochs_total}: loss={box[:6] if box else '-'} P={prec[:5] if prec else '-'} R={rec[:5] if rec else '-'} {eta}"
+                            self._update_train_log(log_line)
+                except Exception:
+                    pass
         self._graph_poll_id = self.root.after(1000, self._poll_graph)
 
     def _draw_graph(self):

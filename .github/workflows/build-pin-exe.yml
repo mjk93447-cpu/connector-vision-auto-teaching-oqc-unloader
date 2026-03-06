@@ -39,6 +39,8 @@ jobs:
 
       - name: Run pin_detection import test
         run: python -c "from pin_detection.gui import main; print('OK')"
+      - name: Test EXE stdout fix (NoneType write)
+        run: python tools_scripts/test_exe_stdout_fix.py
 
       - name: Download yolo26n.pt for offline bundle
         run: python -c "from pathlib import Path; from ultralytics.utils.downloads import attempt_download_asset; Path('models').mkdir(exist_ok=True); attempt_download_asset(Path('models')/'yolo26n.pt')"
