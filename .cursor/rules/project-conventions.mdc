@@ -1,0 +1,16 @@
+---
+description: Connector Vision Auto Teaching for OQC Unloader; coding and doc conventions
+alwaysApply: true
+---
+
+# Project conventions
+
+- Connector Vision Auto Teaching for OQC Unloader Machine.
+- Automates pre-teaching of connector pin and mold positions per product model.
+- Follow FORMAL_DOCUMENTATION.md, DEVELOPMENT_NOTES.md style where applicable.
+
+# Agent capability (see docs/AGENT_CAPABILITY_UPGRADE.md)
+
+- Apply agent-preflight checks before date-bearing docs, CI edits, handoffs.
+- Avoid agent-anti-patterns (date assumption, CI-ignore, doc-only, skip-verify).
+- Run self-review before commit when handoff/docs changed.

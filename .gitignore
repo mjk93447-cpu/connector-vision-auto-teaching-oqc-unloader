@@ -11,7 +11,13 @@ ENV/
 # IDE / Editor
 .idea/
 .vscode/
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/commands/
+!.cursor/commands/**
 *.swp
 *.swo
 

@@ -1,0 +1,48 @@
+---
+description: Concrete mistakes to avoid. Learned from 2026-03-06 week. Apply when writing docs, fixing CI, or doing handoffs.
+alwaysApply: true
+---
+
+# Agent Anti-Patterns — 피해야 할 패턴
+
+이번 주 시행착오에서 도출. 동일 실수 재발 방지.
+
+## 1. 날짜 추측 (Date Assumption)
+
+| ❌ ANTI-PATTERN | ✅ CORRECT |
+|-----------------|------------|
+| "금요일이니까 3/7" | user_info `Today's date` 확인 후 해당 날짜 사용 |
+| 이전 대화의 "내일" 기준으로 작성 | 시스템이 제공하는 현재 날짜만 신뢰 |
+| WEEKLY_HANDOFF_2026_03_07.md (실제 3/6) | WEEKLY_HANDOFF_2026_03_06.md |
+
+**이유**: 잘못된 날짜는 문서 전체 신뢰도를 무너뜨림. 사용자 지적 시 수정 비용 발생.
+
+## 2. CI 전용 실패 무시 (CI-Only Failure Ignored)
+
+| ❌ ANTI-PATTERN | ✅ CORRECT |
+|-----------------|------------|
+| "로컬 통과하니 괜찮다" | 로컬·CI 환경 차이 고려 (cwd, sys.path) |
+| `assert x` 만 사용 | `(code, msg)` 반환, 실패 시 메시지 출력 |
+| import 실패 시 원인 불명 | `sys.path.insert(0, root)`, `os.chdir(root)` 명시 |
+
+**이유**: CI 실패 = 푸시 차단. 원인 파악 없이 재시도만 하면 시간 낭비.
+
+## 3. 문서만 정리 (Documentation-Only Handoff)
+
+| ❌ ANTI-PATTERN | ✅ CORRECT |
+|-----------------|------------|
+| HANDOFF.md, TROUBLESHOOTING.md만 추가 | 규칙(Rules)·스킬(Skill)에 검증·반성 절차 반영 |
+| "다음에 참고하세요" 수준 | "BEFORE X, do Y" 형태로 실행 가능 규칙화 |
+| 경험을 서술만 | EXPERIENCE_REPLAY → agent-preflight, agent-anti-patterns로 변환 |
+
+**이유**: 문서는 사람이 읽어야 함. 규칙은 에이전트가 매 턴 자동 적용.
+
+## 4. 검증 생략 (Skipping Verification)
+
+| ❌ ANTI-PATTERN | ✅ CORRECT |
+|-----------------|------------|
+| 수정 후 "완료"만 보고 | `test_exe_train.bat` 또는 해당 테스트 실행 |
+| EXE 관련 변경 후 빌드 생략 | `build_pin_exe.bat` 후 `test_exe_train.bat` |
+| 날짜 수정 후 재검증 생략 | HANDOFF 링크, 파일명 일치 확인 |
+
+**이유**: 미검증 변경은 다음 주 첫 작업에서 에러로 발견됨.

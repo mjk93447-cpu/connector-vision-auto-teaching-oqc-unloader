@@ -1,0 +1,39 @@
+---
+description: Mandatory pre-action verification. Apply before writing docs, committing, or running CI-related changes.
+alwaysApply: true
+---
+
+# Agent Preflight — 사전 검증
+
+작업 전 반드시 확인. 누락 시 문서 신뢰도·CI 실패·역할 수행 실패로 이어짐.
+
+## 1. 날짜 작성 전 (문서·주석·커밋 메시지에 날짜 포함 시)
+
+**BEFORE** writing any date (e.g. 2026-03-06, "금요일"):
+
+1. **Read** `user_info` in system message for `Today's date` (e.g. "Thursday Mar 5, 2026")
+2. **Convert** to the format you need (YYYY-MM-DD, 요일 등)
+3. **Do NOT** assume or infer date from context — use explicit system-provided value
+
+**WRONG**: "오늘은 금요일이므로 2026-03-07" (금요일 ≠ 3/7, 날짜·요일 불일치 가능)
+**RIGHT**: user_info `Today's date: Thursday Mar 5, 2026` → 2026-03-05 (목)
+
+## 2. CI/테스트 스크립트 수정 전
+
+**BEFORE** editing `tools_scripts/*.py` or `.github/workflows/*`:
+
+1. **Check** if script runs from project root — CI cwd may differ from local
+2. **Add** `sys.path.insert(0, project_root)` and `os.chdir(root)` when importing project modules
+3. **Prefer** `(code, msg)` return over `assert` — assert failure gives no diagnostic message in CI logs
+
+## 3. 문서·인수인계 작성 전
+
+**BEFORE** creating HANDOFF, WEEKLY_HANDOFF, or date-bearing docs:
+
+1. **Verify** current date from user_info
+2. **Use** that date in filenames and content (e.g. WEEKLY_HANDOFF_2026_03_06.md for 2026-03-06)
+
+## 4. 커밋·푸시 전 (선택, 권장)
+
+- Run `python tools_scripts/test_exe_stdout_fix.py` if EXE-related files changed
+- Confirm no `__pycache__` or `pin_models_*` in staged files unless intended

@@ -16,3 +16,5 @@
 | 중장기 계획 | `ROADMAP.md` |
 | 개발 이력 | `DEVELOPMENT_NOTES.md` |
 | 인사이트 | `INSIGHTS.md` |
+| 에이전트 역량 강화 | `docs/AGENT_CAPABILITY_UPGRADE.md` |
+| 경험→규칙 | `docs/EXPERIENCE_REPLAY.md` |

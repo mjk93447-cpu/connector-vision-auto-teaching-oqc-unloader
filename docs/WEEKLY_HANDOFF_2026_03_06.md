@@ -82,3 +82,5 @@ python tools_scripts/test_exe_stdout_fix.py
 - **ROADMAP.md** 10.11a: EXE NoneType 해결 완료
 - **docs/EXE_NONETYPE_FIX_PLAN.md**: 상세 계획
 - **docs/TROUBLESHOOTING.md**: 에러 사례·진단 절차
+- **docs/AGENT_CAPABILITY_UPGRADE.md**: 에이전트 역량 강화 방법론
+- **docs/EXPERIENCE_REPLAY.md**: 경험→규칙 매핑
