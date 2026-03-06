@@ -143,7 +143,7 @@ GT(ground truth) 있을 때 `compute_boundary_optimized_score`:
 - **푸시**: `push_all.bat` (테스트 → 커밋 → 푸시).
 - **EXE**: GitHub Actions → Artifacts. `release_ver20.bat`으로 태그 푸시.
 
-## 13. EXE/CI 에러 해결 인사이트 (2026-03-07)
+## 13. EXE/CI 에러 해결 인사이트 (2026-03-06)
 
 ### NoneType write (PyInstaller GUI)
 

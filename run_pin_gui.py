@@ -6,9 +6,10 @@ Usage: python run_pin_gui.py
 Offline-first: Set YOLO_OFFLINE before any ultralytics import to block
 network calls (model download, pip check, font fetch, etc.).
 
-EXE fix: When console=False (GUI mode), sys.stdout/stderr are None.
-Ultralytics YOLO training writes progress to stdout → AttributeError.
-Redirect None streams to devnull before any imports.
+EXE fix (ROADMAP 10.11a, 2026-03-06): When console=False (GUI mode),
+sys.stdout/stderr are None. Ultralytics YOLO training writes progress
+to stdout → AttributeError. Redirect None streams to devnull before
+any imports. See docs/EXE_NONETYPE_FIX_PLAN.md, docs/TROUBLESHOOTING.md.
 """
 import os
 import sys

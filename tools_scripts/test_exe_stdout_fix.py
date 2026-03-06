@@ -1,6 +1,9 @@
 """
 Test that run_pin_gui handles None stdout/stderr (PyInstaller GUI mode).
 Simulates: sys.stdout=None, sys.stderr=None before import.
+
+CI note: Project root must be in sys.path; use __file__ to resolve.
+See docs/TROUBLESHOOTING.md §2 for CI-only failure resolution.
 """
 import os
 import sys

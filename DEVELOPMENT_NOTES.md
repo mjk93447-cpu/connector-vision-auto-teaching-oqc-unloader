@@ -102,7 +102,7 @@ balanced speed, controllability, and low dependency footprint.
 
 ---
 
-## 10. Pin Detection / EXE Phase (2026-03)
+## 10. Pin Detection / EXE Phase (2026-03-06)
 
 ### 10.1 Pin Detection 파이프라인
 
