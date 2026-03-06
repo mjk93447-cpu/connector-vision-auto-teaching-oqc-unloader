@@ -9,9 +9,9 @@ from ultralytics import YOLO
 
 
 def _default_workers() -> int:
-    """Use multi-core for data loading. Cap at 8 on Windows."""
+    """Use multi-core for data loading. Cap at 4 on Windows for spawn stability."""
     n = os.cpu_count() or 4
-    return min(n, 8)
+    return min(n, 4)
 
 
 def train_pin_model(
@@ -49,7 +49,8 @@ def train_pin_model(
     else:
         raise ValueError("Use --unmasked/--masked or --unmasked-dir/--masked-dir")
 
-    model = YOLO("yolo26n.pt")  # nano for small objects, fast
+    from ._model_path import get_yolo26n_path
+    model = YOLO(get_yolo26n_path())  # nano, bundled in EXE for offline
     n_workers = workers if workers is not None else _default_workers()
 
     # Recall: 20+20 pins must not be missed. Precision: no over-detection.

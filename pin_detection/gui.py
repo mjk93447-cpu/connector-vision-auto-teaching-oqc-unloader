@@ -37,13 +37,15 @@ def _get_cpu_info() -> str:
 
 def _estimate_training_time(n_images: int, imgsz: int, epochs: int, workers: int) -> float:
     """
-    Rough estimate in seconds. Base: ~2 sec per image per epoch at 640px.
-    Scale by (imgsz/640)^2. Workers help data loading (~1.3x with 4 workers).
+    Conservative estimate in seconds for CPU training.
+    Base: ~6 sec per image per epoch at 640px (CPU, no GPU).
+    Scale by (imgsz/640)^2. Workers help data loading (~1.2x with 4 workers).
     """
     if n_images <= 0:
         return 0.0
-    base_per_epoch = n_images * 2.0 * (imgsz / 640) ** 2
-    worker_factor = 1.0 + 0.1 * min(workers, 8)  # up to ~1.8x speedup
+    imgsz = min(imgsz, 1280)  # cap for estimate
+    base_per_epoch = n_images * 6.0 * (imgsz / 640) ** 2
+    worker_factor = 1.0 + 0.05 * min(workers, 4)
     return base_per_epoch * epochs / worker_factor
 
 
@@ -143,7 +145,8 @@ class PinDetectionGUI:
         self.output_dir = tk.StringVar(value="pin_models")
         self.epochs_var = tk.IntVar(value=100)
         self.imgsz_var = tk.IntVar(value=640)
-        self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 8))
+        self._imgsz_max = 1280
+        self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 4))  # cap 4 for Windows stability
         self._train_stop = threading.Event()
 
         self._build_ui()
@@ -185,7 +188,7 @@ class PinDetectionGUI:
         row += 1
 
         ttk.Label(train_f, text="Image size (imgsz):").grid(row=row, column=0, sticky=tk.W, pady=2)
-        sb_imgsz = ttk.Spinbox(train_f, from_=320, to=1280, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
+        sb_imgsz = ttk.Spinbox(train_f, from_=320, to=self._imgsz_max, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
         sb_imgsz.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
         ttk.Label(train_f, text="(640–1280 for small pins)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
@@ -351,12 +354,20 @@ class PinDetectionGUI:
                     workers = int(self.workers_var.get())
                 except Exception:
                     workers = None
+                imgsz = self.imgsz_var.get()
+                if imgsz > getattr(self, "_imgsz_max", 1280):
+                    imgsz = 1280
+                    self.imgsz_var.set(1280)
+                    self.root.after(0, lambda: messagebox.showwarning(
+                        "Image size capped",
+                        "imgsz capped at 1280 for stable training. Larger values can cause very long runs."
+                    ))
                 model_path = train_pin_model(
                     unmasked_dir=u,
                     masked_dir=m,
                     output_dir=out_dir,
                     epochs=self.epochs_var.get(),
-                    imgsz=self.imgsz_var.get(),
+                    imgsz=imgsz,
                     workers=workers,
                 )
 

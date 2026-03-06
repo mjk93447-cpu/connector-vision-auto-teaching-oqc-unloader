@@ -40,6 +40,9 @@ jobs:
       - name: Run pin_detection import test
         run: python -c "from pin_detection.gui import main; print('OK')"
 
+      - name: Download yolo26n.pt for offline bundle
+        run: python -c "from pathlib import Path; from ultralytics.utils.downloads import attempt_download_asset; Path('models').mkdir(exist_ok=True); attempt_download_asset(Path('models')/'yolo26n.pt')"
+
       - name: Build EXE
         shell: cmd
         run: pyinstaller --noconfirm --log-level WARN pin_detection_gui.spec

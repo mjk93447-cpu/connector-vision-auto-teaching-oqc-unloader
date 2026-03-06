@@ -30,6 +30,7 @@ score_penalty_analysis_out/
 # Pin detection
 pin_models/
 pin_models_test/
+models/
 pin_eval_results/
 runs/
 test_data/

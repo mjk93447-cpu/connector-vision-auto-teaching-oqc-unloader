@@ -1,9 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
 hiddenimports = ['ultralytics', 'PIL._tkinter_finder', 'matplotlib']
+# Bundle yolo26n.pt for offline training (build workflow downloads to models/)
+if Path('models/yolo26n.pt').exists():
+    datas.append(('models/yolo26n.pt', 'models'))
 tmp_ret = collect_all('ultralytics')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('numpy')
