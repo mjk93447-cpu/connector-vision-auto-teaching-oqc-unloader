@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .inference import run_inference, split_upper_lower, compute_spacing_mm
 from .excel_io import load_excel_format, write_result_excel
+from .dataset import extract_cell_id
 
 
 def _select_dir(parent, title: str) -> str:
@@ -73,14 +74,14 @@ This tool detects connector pins in top-view images using YOLO26. It has two mod
 ================================================================================
 
 STEP 1: Prepare your data
-  • Unmasked images: Original connector top-view photos (10 images recommended).
+  • Unmasked images: Original connector top-view photos (10+ recommended).
   • Masked images: Same photos with pin regions marked in green dots.
-  • Each pair must have the same filename (e.g. 01.jpg, 01_masked.jpg).
+  • Pairing: by filename stem OR by cell ID (A2HDxxxx in filename, e.g. 20250101_120000_A2HD001.jpg).
 
 STEP 2: Select folders
   • Unmasked images folder: Browse to the folder containing original images.
   • Masked images folder: Browse to the folder containing masked images.
-  • Excel folder (optional): Reference Excel files for output format.
+  • Excel file (optional): Reference Excel for output format (multi-row: one row per cell).
 
 STEP 3: Output folder
   • Where the trained model will be saved (default: pin_models).
@@ -105,12 +106,13 @@ STEP 2: Select model
   • Browse to the trained .pt file (e.g. pin_models/pin_run/weights/best.pt).
 
 STEP 3: Excel format ref (optional)
-  • If you used a reference Excel during training, select it to match output format.
+  • Select multi-row Excel (row 1=headers, row 2+=one per cell). If image has A2HDxxxx in filename,
+    the result is written to the matching row. Otherwise a new result.xlsx is created.
 
 STEP 4: Run inference
   • Click "Run inference". Outputs:
     - Masked image: <filename>_masked.png (green dots on detected pins)
-    - Excel: result.xlsx (pin count, OK/NG, spacing values)
+    - Excel: updated at cell row (if A2HD format) or result.xlsx
 
 ================================================================================
   OUTPUT INTERPRETATION
@@ -172,9 +174,9 @@ class PinDetectionGUI:
         ttk.Button(train_f, text="Browse", command=lambda: self._on_masked_browse()).grid(row=row, column=2, pady=2)
         row += 1
 
-        ttk.Label(train_f, text="Excel folder (optional):").grid(row=row, column=0, sticky=tk.W, pady=2)
+        ttk.Label(train_f, text="Excel file (optional):").grid(row=row, column=0, sticky=tk.W, pady=2)
         ttk.Entry(train_f, textvariable=self.excel_dir, width=45).grid(row=row, column=1, padx=4, pady=2)
-        ttk.Button(train_f, text="Browse", command=lambda: self.excel_dir.set(_select_dir(self.root, "Excel folder"))).grid(row=row, column=2, pady=2)
+        ttk.Button(train_f, text="Browse", command=lambda: self.excel_dir.set(_select_file(self.root, "Excel", [("Excel", "*.xlsx *.xls")]) or self.excel_dir.get())).grid(row=row, column=2, pady=2)
         row += 1
 
         ttk.Label(train_f, text="Output folder:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -535,17 +537,24 @@ class PinDetectionGUI:
                 if ef:
                     format_ref = load_excel_format(ef)
 
+                cell_id = extract_cell_id(Path(img_path))
+                update_existing = bool(ef and cell_id and Path(ef).exists())
+                excel_path_to_use = Path(ef) if update_existing else excel_out
+
                 write_result_excel(
-                    excel_out,
+                    excel_path_to_use,
                     upper_count=len(upper),
                     lower_count=len(lower),
                     upper_spacings=upper_spacings,
                     lower_spacings=lower_spacings,
                     format_ref=format_ref,
+                    cell_id=cell_id,
+                    update_existing=update_existing,
                 )
 
                 ok = len(upper) == 20 and len(lower) == 20
-                msg = f"Upper: {len(upper)}, Lower: {len(lower)} → {'OK' if ok else 'NG'}\nImage: {out_img_path}\nExcel: {excel_out}"
+                excel_msg = excel_path_to_use
+                msg = f"Upper: {len(upper)}, Lower: {len(lower)} → {'OK' if ok else 'NG'}\nImage: {out_img_path}\nExcel: {excel_msg}"
                 self.root.after(0, lambda: self.inference_status.config(text=msg))
                 self.root.after(0, lambda: messagebox.showinfo("Done", msg))
             except Exception as e:

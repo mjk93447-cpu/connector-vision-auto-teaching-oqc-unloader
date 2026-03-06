@@ -2,7 +2,9 @@
 Build YOLO dataset from masked/unmasked image pairs.
 Supports 1 pair, dir (unmasked-dir + masked-dir), train/val split.
 ROI crop for large images (5496×3672): extract pin region, crop, then train.
+Cell-ID pairing: filenames with YYYYMMDD_HHMMSS_A2HD{cell_no} → pair by A2HD{cell_no}.
 """
+import re
 import random
 import shutil
 from pathlib import Path
@@ -16,6 +18,18 @@ from .roi import extract_pin_roi, crop_to_roi
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 ROI_SIZE_THRESHOLD = 2000  # max(w,h) > this → use ROI crop
+
+# Cell ID: A2HD + alphanumeric (e.g. A2HD001, A2HD12345)
+CELL_ID_PATTERN = re.compile(r"(A2HD[A-Za-z0-9]+)", re.IGNORECASE)
+
+
+def extract_cell_id(path: Path) -> str | None:
+    """
+    Extract cell ID (A2HDxxxx) from filename.
+    Example: 20250101_120000_A2HD001.jpg → A2HD001
+    """
+    m = CELL_ID_PATTERN.search(path.stem)
+    return m.group(1).upper() if m else None
 
 
 def validate_pair_dimensions(unmasked_path: Path, masked_path: Path) -> None:
@@ -125,19 +139,35 @@ def get_dataset_info(data_yaml: Path) -> dict:
 def _find_masked_pair(unmasked_path: Path, masked_dir: Path) -> Path:
     """
     Find masked file for unmasked image.
-    Supports cross-format pairing: unmasked 2.bmp <-> masked 2.jpg
-    Priority: 1) exact name 2) stem_masked.suffix 3) stem + any IMG_EXTS
+    Cell-ID pairing: 20250101_120000_A2HD001.jpg <-> any masked file containing A2HD001.
+    Fallback: stem-based (exact name, stem_masked, stem + IMG_EXTS).
     """
     stem = unmasked_path.stem
-    # 1) Exact match
+    cell_id = extract_cell_id(unmasked_path)
+
+    # 1) Cell-ID pairing: find masked file with same cell ID
+    if cell_id:
+        masked_files = [f for f in masked_dir.iterdir() if f.suffix.lower() in IMG_EXTS]
+        for mf in masked_files:
+            if cell_id in mf.stem.upper():
+                # Prefer same stem, then stem_masked
+                if mf.stem == stem:
+                    return mf
+                if mf.stem == f"{stem}_masked":
+                    return mf
+        for mf in masked_files:
+            if cell_id in mf.stem.upper():
+                return mf  # any match
+
+    # 2) Exact name
     m = masked_dir / unmasked_path.name
     if m.exists():
         return m
-    # 2) stem_masked.suffix (e.g. 2_masked.bmp)
+    # 3) stem_masked.suffix (e.g. 2_masked.bmp)
     m2 = masked_dir / f"{stem}_masked{unmasked_path.suffix}"
     if m2.exists():
         return m2
-    # 3) stem + other extensions (bmp/jpg cross-pairing)
+    # 4) stem + other extensions (bmp/jpg cross-pairing)
     for ext in IMG_EXTS:
         cand = masked_dir / f"{stem}{ext}"
         if cand.exists():

@@ -114,6 +114,21 @@ class TestDatasetPairing(unittest.TestCase):
             m = _find_masked_pair(unmasked / "01.jpg", masked)
             self.assertEqual(m.name, "01.bmp")
 
+    def test_find_masked_pair_cell_id(self):
+        """Unmasked 20250101_120000_A2HD001.jpg pairs with masked by cell ID."""
+        from pin_detection.dataset import _find_masked_pair, extract_cell_id
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            unmasked = tmp / "unmasked"
+            masked = tmp / "masked"
+            unmasked.mkdir()
+            masked.mkdir()
+            (unmasked / "20250101_120000_A2HD001.jpg").touch()
+            (masked / "20250101_120500_A2HD001_masked.jpg").touch()
+            m = _find_masked_pair(unmasked / "20250101_120000_A2HD001.jpg", masked)
+            self.assertIn("A2HD001", m.stem.upper())
+            self.assertEqual(extract_cell_id(Path("20250101_120000_A2HD001.jpg")), "A2HD001")
+
     def test_find_masked_pair_missing_raises(self):
         from pin_detection.dataset import _find_masked_pair
         with tempfile.TemporaryDirectory() as tmp:
