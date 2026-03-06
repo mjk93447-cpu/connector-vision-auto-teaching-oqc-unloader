@@ -51,6 +51,11 @@ def masked_image_to_annotations(masked_path: str | Path) -> Tuple[np.ndarray, Li
     Returns: (image_array, list of (xc, yc, w, h) normalized)
     """
     img = np.array(Image.open(masked_path).convert("RGB"))
+    return masked_array_to_annotations(img)
+
+
+def masked_array_to_annotations(img: np.ndarray) -> Tuple[np.ndarray, List[Tuple[float, float, float, float]]]:
+    """Extract YOLO annotations from masked image array (green regions)."""
     h, w = img.shape[:2]
     mask = extract_green_mask(img)
     bboxes = cluster_to_bbox(mask)

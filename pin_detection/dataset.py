@@ -1,17 +1,21 @@
 """
 Build YOLO dataset from masked/unmasked image pairs.
 Supports 1 pair, dir (unmasked-dir + masked-dir), train/val split.
+ROI crop for large images (5496×3672): extract pin region, crop, then train.
 """
 import random
 import shutil
 from pathlib import Path
 from typing import List, Tuple
 
+import numpy as np
 from PIL import Image
 
-from .annotation import masked_image_to_annotations
+from .annotation import masked_array_to_annotations
+from .roi import extract_pin_roi, crop_to_roi
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
+ROI_SIZE_THRESHOLD = 2000  # max(w,h) > this → use ROI crop
 
 
 def validate_pair_dimensions(unmasked_path: Path, masked_path: Path) -> None:
@@ -36,24 +40,34 @@ def _add_one_pair(
     images_dir: Path,
     labels_dir: Path,
     class_id: int = 0,
+    use_roi: bool = False,
+    roi_margin: float = 0.15,
 ) -> None:
-    """Add one image pair to dataset."""
+    """Add one image pair to dataset. Optionally crop to ROI for large images."""
     validate_pair_dimensions(unmasked_path, masked_path)
-    _, yolo_anns = masked_image_to_annotations(masked_path)
+    u_img = np.array(Image.open(unmasked_path).convert("RGB"))
+    m_img, yolo_anns = masked_array_to_annotations(
+        np.array(Image.open(masked_path).convert("RGB"))
+    )
     if not yolo_anns:
         raise ValueError(f"No green pin regions found in {masked_path}")
 
+    h, w = u_img.shape[:2]
+    if use_roi and max(w, h) > ROI_SIZE_THRESHOLD:
+        roi = extract_pin_roi(masked_path, margin_ratio=roi_margin)
+        u_img = crop_to_roi(u_img, roi)
+        m_img = crop_to_roi(m_img, roi)
+        _, yolo_anns = masked_array_to_annotations(m_img)
+
     stem = unmasked_path.stem
-    dst_img = images_dir / f"{stem}{unmasked_path.suffix}"
-    if dst_img.suffix.lower() not in IMG_EXTS:
-        dst_img = images_dir / f"{stem}.jpg"
-    shutil.copy2(unmasked_path, dst_img)
+    dst_img = images_dir / f"{stem}.jpg"
+    Image.fromarray(u_img).save(dst_img, quality=95)
     stem_out = dst_img.stem
 
     label_path = labels_dir / f"{stem_out}.txt"
     with open(label_path, "w") as f:
-        for xc, yc, w, h in yolo_anns:
-            f.write(f"{class_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n")
+        for xc, yc, bw, bh in yolo_anns:
+            f.write(f"{class_id} {xc:.6f} {yc:.6f} {bw:.6f} {bh:.6f}\n")
 
 
 def prepare_yolo_dataset(
@@ -61,6 +75,8 @@ def prepare_yolo_dataset(
     masked_path: Path,
     output_dir: Path,
     class_id: int = 0,
+    use_roi: bool = True,
+    roi_margin: float = 0.15,
 ) -> Path:
     """
     Create YOLO dataset from one image pair.
@@ -72,7 +88,7 @@ def prepare_yolo_dataset(
     images_dir.mkdir(parents=True, exist_ok=True)
     labels_dir.mkdir(parents=True, exist_ok=True)
 
-    _add_one_pair(unmasked_path, masked_path, images_dir, labels_dir, class_id)
+    _add_one_pair(unmasked_path, masked_path, images_dir, labels_dir, class_id, use_roi=use_roi, roi_margin=roi_margin)
 
     data_yaml = output_dir / "data.yaml"
     with open(data_yaml, "w") as f:
@@ -139,11 +155,15 @@ def prepare_yolo_dataset_from_dirs(
     class_id: int = 0,
     val_split: float = 0.2,
     seed: int = 42,
+    use_roi: bool = True,
+    roi_margin: float = 0.15,
 ) -> Path:
     """
     Create YOLO dataset from directories.
     Pairs by matching filename. unmasked/01.jpg <-> masked/01.jpg
     val_split: fraction for validation (0.2 = 80% train, 20% val). 0 = no split (train=val).
+    use_roi: when max(w,h)>2000, crop to pin region before training (saves compute).
+    roi_margin: margin around pin bbox (0.15 = 15%).
     """
     output_dir = Path(output_dir)
     train_img = output_dir / "images" / "train"
@@ -178,10 +198,10 @@ def prepare_yolo_dataset_from_dirs(
 
     for u_path in train_files:
         m_path = _find_masked_pair(u_path, masked_dir)
-        _add_one_pair(u_path, m_path, train_img, train_lbl, class_id)
+        _add_one_pair(u_path, m_path, train_img, train_lbl, class_id, use_roi=use_roi, roi_margin=roi_margin)
     for u_path in val_files:
         m_path = _find_masked_pair(u_path, masked_dir)
-        _add_one_pair(u_path, m_path, val_img, val_lbl, class_id)
+        _add_one_pair(u_path, m_path, val_img, val_lbl, class_id, use_roi=use_roi, roi_margin=roi_margin)
 
     data_yaml = output_dir / "data.yaml"
     val_path = "images/val" if val_files else "images/train"
@@ -200,6 +220,8 @@ def prepare_yolo_test_dataset(
     masked_dir: Path,
     output_dir: Path,
     class_id: int = 0,
+    use_roi: bool = True,
+    roi_margin: float = 0.15,
 ) -> Path:
     """
     Create YOLO-format test dataset (for model.val() mAP50).
@@ -219,7 +241,7 @@ def prepare_yolo_test_dataset(
 
     for u_path in u_files:
         m_path = _find_masked_pair(u_path, masked_dir)
-        _add_one_pair(u_path, m_path, img_dir, lbl_dir, class_id)
+        _add_one_pair(u_path, m_path, img_dir, lbl_dir, class_id, use_roi=use_roi, roi_margin=roi_margin)
 
     data_yaml = output_dir / "data.yaml"
     with open(data_yaml, "w") as f:

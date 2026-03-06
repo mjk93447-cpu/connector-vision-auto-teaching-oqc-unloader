@@ -212,6 +212,78 @@ class TestDatasetPairing(unittest.TestCase):
             self.assertEqual(len(train_imgs) + len(val_imgs), 5)
 
 
+class TestROI(unittest.TestCase):
+    """Test ROI extraction for large images."""
+
+    def test_extract_pin_roi(self):
+        from pin_detection.roi import extract_pin_roi, crop_to_roi
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            m_img = np.zeros((100, 100, 3), dtype=np.uint8)
+            m_img[:, :] = 50
+            m_img[30:50, 20:80] = [0, 255, 0]  # green band
+            m_path = tmp / "masked.jpg"
+            Image.fromarray(m_img).save(m_path)
+            roi = extract_pin_roi(m_path, margin_ratio=0.1)
+            x1, y1, x2, y2 = roi
+            self.assertLess(x1, 25)
+            self.assertGreater(x2, 75)
+            self.assertLess(y1, 35)
+            self.assertGreater(y2, 45)
+            cropped = crop_to_roi(m_img, roi)
+            self.assertGreater(cropped.shape[0], 20)
+            self.assertGreater(cropped.shape[1], 60)
+
+    def test_prepare_from_dirs_large_uses_roi(self):
+        """5496x3672-like: ROI crop should produce smaller dataset images."""
+        from pin_detection.dataset import prepare_yolo_dataset_from_dirs
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            u_dir = tmp / "unmasked"
+            m_dir = tmp / "masked"
+            u_dir.mkdir()
+            m_dir.mkdir()
+            # Large image 2500x2500 (above ROI_SIZE_THRESHOLD 2000)
+            base = np.zeros((2500, 2500, 3), dtype=np.uint8)
+            m_img = base.copy()
+            m_img[1100:1200, 1100:1300] = [0, 255, 0]  # green in center
+            Image.fromarray(base).save(u_dir / "01.jpg")
+            Image.fromarray(m_img).save(m_dir / "01.jpg")
+            out = tmp / "out"
+            prepare_yolo_dataset_from_dirs(u_dir, m_dir, out, use_roi=True)
+            out_img = out / "images" / "train" / "01.jpg"
+            self.assertTrue(out_img.exists())
+            with Image.open(out_img) as im:
+                w, h = im.size
+            self.assertLess(w, 500)
+            self.assertLess(h, 500)
+
+    def test_roi_preserves_all_pins(self):
+        """ROI crop must not lose any pins (40-pin connector)."""
+        from pin_detection.annotation import masked_array_to_annotations
+        from pin_detection.roi import extract_pin_roi, crop_to_roi
+        # Create large image with 40 green pin regions (simplified: one block per row)
+        h_img, w_img = 3000, 3000
+        m_img = np.zeros((h_img, w_img, 3), dtype=np.uint8)
+        m_img[:, :] = 50
+        # 20+20 pins in center region (640x480 equivalent at center)
+        cx, cy = w_img // 2, h_img // 2
+        for row in range(2):
+            for col in range(20):
+                y0 = cy - 120 + row * 150 + (col % 5) * 2
+                x0 = cx - 200 + col * 20
+                m_img[y0 : y0 + 4, x0 : x0 + 4] = [0, 255, 0]
+        with tempfile.TemporaryDirectory() as tmp:
+            m_path = Path(tmp) / "masked.jpg"
+            Image.fromarray(m_img).save(m_path)
+            _, anns_before = masked_array_to_annotations(m_img)
+            roi = extract_pin_roi(m_path, margin_ratio=0.15)
+            cropped = crop_to_roi(m_img, roi)
+            _, anns_after = masked_array_to_annotations(cropped)
+            self.assertEqual(len(anns_before), len(anns_after),
+                             f"ROI must preserve all pins: before={len(anns_before)} after={len(anns_after)}")
+
+
 class TestDimensionValidation(unittest.TestCase):
     """Verify dimension check is added and works."""
 

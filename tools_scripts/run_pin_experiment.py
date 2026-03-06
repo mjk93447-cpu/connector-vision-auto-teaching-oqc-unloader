@@ -127,7 +127,7 @@ def main() -> int:
         with Image.open(u_path) as im:
             w, h = im.size
 
-        # Inference (reuse model for speed)
+        # Inference (reuse model for speed). Use masked_path for ROI when large image.
         t0 = time.perf_counter()
         _, detections, _ = run_inference(
             model_path=model_path,
@@ -136,6 +136,7 @@ def main() -> int:
             cap_precision=True,
             use_geometry_refinement=not getattr(args, "no_geometry_refinement", False),
             model=yolo_model,
+            masked_path=m_path,
         )
         latencies.append((time.perf_counter() - t0) * 1000)
 
