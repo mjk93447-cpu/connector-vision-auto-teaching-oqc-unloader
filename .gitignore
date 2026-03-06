@@ -28,6 +28,11 @@ score_penalty_analysis_out/
 
 # Pin detection
 pin_models/
+pin_models_test/
+pin_eval_results/
+runs/
+test_data/
+yolo26n.pt
 
 # Test / eval artifacts
 test_images_auto/

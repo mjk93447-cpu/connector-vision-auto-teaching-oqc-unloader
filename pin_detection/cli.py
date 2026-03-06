@@ -25,6 +25,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             epochs=args.epochs,
             imgsz=args.imgsz,
             workers=args.workers,
+            val_split=getattr(args, "val_split", 0.2),
         )
     elif args.unmasked and args.masked:
         model_path = train_pin_model(
@@ -74,6 +75,26 @@ def cmd_inference(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parent.parent
+    cmd = [
+        sys.executable, "-m", "tools_scripts.run_pin_experiment",
+        "--model", str(args.model),
+        "--unmasked-dir", str(args.unmasked_dir),
+        "--masked-dir", str(args.masked_dir),
+        "--conf", str(args.conf),
+        "--iou", str(args.iou),
+        "--max-dist", str(args.max_dist),
+    ]
+    if getattr(args, "run_map50", False):
+        cmd.append("--run-map50")
+    if getattr(args, "save_dir", None):
+        cmd.extend(["--save-dir", str(args.save_dir)])
+    return subprocess.run(cmd, cwd=root).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Connector pin detection (YOLO26)")
     sub = parser.add_subparsers(dest="cmd", help="Command")
@@ -88,6 +109,7 @@ def main() -> int:
     train_p.add_argument("--epochs", type=int, default=100)
     train_p.add_argument("--imgsz", type=int, default=640)
     train_p.add_argument("--workers", type=int, default=None, help="Data loading workers (default: cpu_count)")
+    train_p.add_argument("--val-split", type=float, default=0.2, dest="val_split", help="Validation split (0.2 = 80%% train)")
     train_p.set_defaults(func=cmd_train)
 
     gui_p = sub.add_parser("gui", help="Launch GUI (train/inference)")
@@ -101,6 +123,17 @@ def main() -> int:
     inf_p.add_argument("--excel-format", help="Reference Excel for format (from training)")
     inf_p.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     inf_p.set_defaults(func=cmd_inference)
+
+    eval_p = sub.add_parser("eval", help="Evaluate Recall/Precision vs GT (masked images)")
+    eval_p.add_argument("--model", required=True, help="Trained model .pt path")
+    eval_p.add_argument("--unmasked-dir", dest="unmasked_dir", required=True, help="Unmasked images")
+    eval_p.add_argument("--masked-dir", dest="masked_dir", required=True, help="Masked images (GT)")
+    eval_p.add_argument("--conf", type=float, default=0.01, help="Confidence threshold")
+    eval_p.add_argument("--iou", type=float, default=0, help="IoU threshold (0=use max-dist)")
+    eval_p.add_argument("--max-dist", type=float, default=50, help="Max center distance (px) for matching")
+    eval_p.add_argument("--run-map50", action="store_true", dest="run_map50", help="Run YOLO val for mAP50")
+    eval_p.add_argument("--save-dir", dest="save_dir", help="Save metrics and confusion matrix JSON")
+    eval_p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args()
     if not args.cmd:

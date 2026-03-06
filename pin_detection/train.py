@@ -24,6 +24,7 @@ def train_pin_model(
     epochs: int = 100,
     imgsz: int = 640,
     workers: int | None = None,
+    val_split: float = 0.2,
 ) -> Path:
     """
     Train pin detection model.
@@ -39,7 +40,7 @@ def train_pin_model(
 
     if unmasked_dir and masked_dir:
         data_yaml = prepare_yolo_dataset_from_dirs(
-            Path(unmasked_dir), Path(masked_dir), dataset_dir
+            Path(unmasked_dir), Path(masked_dir), dataset_dir, val_split=val_split
         )
     elif unmasked_path and masked_path:
         data_yaml = prepare_yolo_dataset(

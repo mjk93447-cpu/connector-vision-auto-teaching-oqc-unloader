@@ -137,3 +137,74 @@ openpyxl          # Excel
 - 확인 필요 사항은 문서에 기록하고, 합리적 가정으로 우선 진행.
 - 모순·결함 발견 시 즉시 설명하고 질문하여 해소.
 - ROADMAP은 검토 결과에 따라 반영·수정.
+
+---
+
+## 9. 개발 현황 분석 (2026-03-05)
+
+### 9.1 완료 항목
+
+- 데이터셋: 마스킹 전/후 쌍 매칭, unmasked/masked 동일 해상도 검증
+- 학습/추론 파이프라인, GUI, CLI, 엑셀 입출력
+- 자체 테스트: `tests/test_pin_dataset.py` (11개)
+
+### 9.2 성능 지표 미적용
+
+| 지표 | 목표 | 현황 |
+|------|------|------|
+| Recall | 100% | 측정·평가 없음 |
+| Precision | 100% | cap_at_20_per_row만 적용, 실제 Precision 미측정 |
+| 영역 마스킹 | 정확 | IoU/위치 정확도 미측정 |
+
+### 9.3 상세 분석
+
+- `docs/PIN_DETECTION_ANALYSIS.md` 참고
+
+---
+
+## 10. 중장기 필수 추가 개발
+
+### 10.1 Phase 5 — 성능 평가 (필수)
+
+| 작업 | 설명 | 산출물 |
+|------|------|--------|
+| **Recall/Precision 평가** | masked(GT) vs 추론 bbox IoU 매칭 | `pin eval` 또는 `tools.py pin eval` |
+| **Validation split** | train 80% / val 20% 분리, data.yaml 수정 | 과적합 방지, 조기 종료 |
+| **평가 스크립트** | `--model`, `--unmasked-dir`, `--masked-dir` → Recall, Precision, F1 출력 | CLI `pin eval` |
+
+### 10.2 Phase 6 — 운영·품질 강화
+
+| 작업 | 설명 | 산출물 |
+|------|------|--------|
+| **배치 추론** | `--image-dir` 지원, 폴더 단위 추론 | CLI `pin inference --image-dir` |
+| **Confidence 튜닝** | Recall 100% 달성용 conf threshold 탐색 | 평가 스크립트 옵션 |
+| **추론 속도 벤치마크** | 이미지당 ms, FPS 측정 | `pin benchmark` 또는 tools.py 연동 |
+
+### 10.3 Phase 7 — 품질 검증 (권장)
+
+| 작업 | 설명 |
+|------|------|
+| **Excel ↔ 어노테이션 검증** | 학습 시 Excel 핀 개수 vs bbox 개수 불일치 경고 |
+| **위/아래 클래스 분리** | class 0: upper, class 1: lower (선택) |
+| **모델 비교** | YOLO26n vs s/m Recall·Precision·속도 트레이드오프 |
+
+### 10.4 우선순위 요약
+
+1. **필수**: Recall/Precision 평가 스크립트, Validation split
+2. **중요**: 배치 추론, conf 튜닝, 속도 벤치마크
+3. **권장**: Excel 검증, 클래스 분리, 모델 비교
+
+---
+
+### 10.5 정확한 핀 감지 및 오탐지 방지 (중장기 전략)
+
+FPC/FFC 커넥터(20p×2, 총 40핀) 흑백 공장 이미지 기반 테스트 결과를 반영한 추가 개발 계획.
+
+| 작업 | 설명 | 목표 |
+|------|------|------|
+| **Recall 100% 달성** | conf threshold 스캔, max-dist 매칭 검증, FN 원인 분석 | 위·아래 각 20개 누락 없음 |
+| **Precision 100% 달성** | dust/scratch 등 fake pin(노이즈)에 대한 오탐 방지 | 20개 초과 감지 금지 |
+| **합성 데이터 강화** | FPC 스타일 직사각형 패드, 흑백, fake dot 다양화 | 실제 공장 이미지와 유사도 향상 |
+| **후처리 규칙** | 상·하단 각 20개 고정 시 초과 감지 제거(cap_at_20_per_row) | 과탐지 억제 |
+| **노이즈 학습** | fake pin 위치를 negative 샘플로 활용(선택) | 오탐지 억제 |
+| **실제 공장 데이터 검증** | 합성 학습 모델 → 실제 흑백 이미지 평가 | domain gap 측정·보완 |
