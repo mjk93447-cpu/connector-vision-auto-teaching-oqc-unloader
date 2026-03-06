@@ -92,6 +92,8 @@ def cmd_eval(args: argparse.Namespace) -> int:
         cmd.append("--run-map50")
     if getattr(args, "save_dir", None):
         cmd.extend(["--save-dir", str(args.save_dir)])
+    if getattr(args, "no_geometry_refinement", False):
+        cmd.append("--no-geometry-refinement")
     return subprocess.run(cmd, cwd=root).returncode
 
 
@@ -133,6 +135,7 @@ def main() -> int:
     eval_p.add_argument("--max-dist", type=float, default=50, help="Max center distance (px) for matching")
     eval_p.add_argument("--run-map50", action="store_true", dest="run_map50", help="Run YOLO val for mAP50")
     eval_p.add_argument("--save-dir", dest="save_dir", help="Save metrics and confusion matrix JSON")
+    eval_p.add_argument("--no-geometry-refinement", action="store_true", dest="no_geometry_refinement", help="Disable 20+20 grid refinement")
     eval_p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args()

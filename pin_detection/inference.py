@@ -14,15 +14,20 @@ def run_inference(
     output_image_path: str | Path | None = None,
     conf_threshold: float = 0.25,
     cap_precision: bool = True,
+    use_geometry_refinement: bool = True,
+    model: "YOLO | None" = None,
 ) -> Tuple[np.ndarray, List[Tuple[float, float, float, float]], np.ndarray]:
     """
     Run YOLO inference on connector image.
     Returns: (original_image, list of (x_center, y_center, w, h) normalized, masked_image)
     cap_precision: 위/아래 각 20개 초과 시 confidence 상위 20개만 유지 (Precision 보장)
+    use_geometry_refinement: 20+20 고정, 균일 간격 보간으로 Recall/Precision 극대화
+    model: 재사용 시 기존 YOLO 인스턴스 전달 (속도 개선)
     """
     from ultralytics import YOLO
 
-    model = YOLO(model_path)
+    if model is None:
+        model = YOLO(model_path)
     img = np.array(Image.open(image_path).convert("RGB"))
     h, w = img.shape[:2]
 
@@ -45,7 +50,10 @@ def run_inference(
         detections.append((xc, yc, bw, bh))
         confidences.append(conf)
 
-    if cap_precision and confidences:
+    if use_geometry_refinement and detections:
+        from .geometry_refinement import refine_to_fixed_grid
+        detections = refine_to_fixed_grid(detections, confidences, w, h, n_per_row=20)
+    elif cap_precision and confidences:
         detections = cap_at_20_per_row(detections, confidences)
 
     masked = draw_green_dots(img, detections, w, h)

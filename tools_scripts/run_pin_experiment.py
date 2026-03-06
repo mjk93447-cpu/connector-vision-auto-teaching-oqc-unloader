@@ -88,6 +88,7 @@ def main() -> int:
     parser.add_argument("--run-map50", action="store_true", help="Run YOLO val() for mAP50 (needs test dataset)")
     parser.add_argument("--test-dataset-dir", help="Prepare YOLO test dataset here and run mAP50")
     parser.add_argument("--save-dir", help="Save metrics and confusion matrix JSON")
+    parser.add_argument("--no-geometry-refinement", action="store_true", help="Disable 20+20 grid refinement")
     args = parser.parse_args()
 
     root = _project_root()
@@ -101,6 +102,10 @@ def main() -> int:
     total_tp, total_fp, total_fn = 0, 0, 0
     total_fp_on_fake = 0  # detections on fake pins (noise)
     latencies = []
+
+    # Load model once for batch eval (speed)
+    from ultralytics import YOLO
+    yolo_model = YOLO(model_path)
 
     meta_path = unmasked_dir.parent / "meta.json"
     meta = {}
@@ -122,13 +127,15 @@ def main() -> int:
         with Image.open(u_path) as im:
             w, h = im.size
 
-        # Inference
+        # Inference (reuse model for speed)
         t0 = time.perf_counter()
         _, detections, _ = run_inference(
             model_path=model_path,
             image_path=u_path,
             conf_threshold=args.conf,
             cap_precision=True,
+            use_geometry_refinement=not getattr(args, "no_geometry_refinement", False),
+            model=yolo_model,
         )
         latencies.append((time.perf_counter() - t0) * 1000)
 
