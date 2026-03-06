@@ -115,6 +115,94 @@ def prepare_yolo_dataset(
     return data_yaml
 
 
+def analyze_dataset_for_training(
+    unmasked_dir: Path,
+    masked_dir: Path,
+    max_samples: int = 5,
+) -> dict:
+    """
+    Quick scan of dataset to suggest optimal training parameters.
+    Samples up to max_samples images, extracts image size and pin bbox sizes.
+    Returns: {imgsz, epochs, val_split, note, pin_avg_w, pin_avg_h, n_images, img_w, img_h}.
+    """
+    unmasked_dir = Path(unmasked_dir)
+    masked_dir = Path(masked_dir)
+    u_files = sorted([f for f in unmasked_dir.iterdir() if f.suffix.lower() in IMG_EXTS], key=lambda p: p.name)
+    if not u_files:
+        return {"imgsz": 640, "epochs": 100, "val_split": 0.2, "note": "No images"}
+
+    n_images = len(u_files)
+    samples = u_files[: min(max_samples, len(u_files))]
+    img_sizes = []
+    pin_widths = []
+    pin_heights = []
+
+    for u_path in samples:
+        try:
+            with Image.open(u_path) as im:
+                img_sizes.append(im.size)
+        except Exception:
+            continue
+        try:
+            m_path = _find_masked_pair(u_path, masked_dir)
+            m_img = np.array(Image.open(m_path).convert("RGB"))
+            _, yolo_anns = masked_array_to_annotations(m_img)
+            w, h = m_img.shape[1], m_img.shape[0]
+            for xc, yc, bw, bh in yolo_anns:
+                pin_widths.append(bw * w)
+                pin_heights.append(bh * h)
+        except Exception:
+            pass
+
+    img_w = img_sizes[0][0] if img_sizes else 0
+    img_h = img_sizes[0][1] if img_sizes else 0
+    max_dim = max(img_w, img_h) if img_sizes else 0
+
+    # imgsz: 320, 416, 512, 640, 768, 896, 1024, 1280 (YOLO typical)
+    imgsz = 640
+    note_parts = []
+
+    if max_dim > ROI_SIZE_THRESHOLD:
+        imgsz = 640
+        note_parts.append("ROI crop")
+    elif max_dim > 0:
+        if pin_widths and pin_heights:
+            avg_w = sum(pin_widths) / len(pin_widths)
+            avg_h = sum(pin_heights) / len(pin_heights)
+            if avg_w * avg_h < 120 or avg_w < 12 or avg_h < 8:
+                imgsz = 1280
+                note_parts.append("small pins")
+            elif max_dim < 640:
+                imgsz = min(1280, max(640, max_dim))
+                note_parts.append("match resolution")
+        else:
+            imgsz = min(1280, max(640, max_dim)) if max_dim > 400 else 640
+
+    epochs = 150 if n_images < 15 else 100
+    if n_images < 10:
+        epochs = 180
+        note_parts.append("few images")
+
+    val_split = 0.2
+    if n_images < 5:
+        val_split = 0.0
+        note_parts.append("no val split")
+
+    note = ", ".join(note_parts) if note_parts else "default"
+
+    return {
+        "imgsz": imgsz,
+        "epochs": epochs,
+        "val_split": val_split,
+        "note": note,
+        "pin_avg_w": sum(pin_widths) / len(pin_widths) if pin_widths else 0,
+        "pin_avg_h": sum(pin_heights) / len(pin_heights) if pin_heights else 0,
+        "n_images": n_images,
+        "img_w": img_w,
+        "img_h": img_h,
+    }
+
+
 def get_dataset_info(data_yaml: Path) -> dict:
     """Return n_images, img_w, img_h from dataset."""
     from PIL import Image

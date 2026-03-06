@@ -227,6 +227,32 @@ class TestDatasetPairing(unittest.TestCase):
             self.assertEqual(len(train_imgs) + len(val_imgs), 5)
 
 
+class TestDatasetAnalyzer(unittest.TestCase):
+    """Test dataset auto-optimization analyzer."""
+
+    def test_analyze_dataset_for_training(self):
+        from pin_detection.dataset import analyze_dataset_for_training
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            u_dir = tmp / "unmasked"
+            m_dir = tmp / "masked"
+            u_dir.mkdir()
+            m_dir.mkdir()
+            base = np.zeros((100, 100, 3), dtype=np.uint8)
+            m_img = base.copy()
+            m_img[20:30, 20:30] = [0, 255, 0]
+            for i in range(3):
+                Image.fromarray(base).save(u_dir / f"{i+1:02d}.jpg")
+                Image.fromarray(m_img).save(m_dir / f"{i+1:02d}.jpg")
+            r = analyze_dataset_for_training(u_dir, m_dir, max_samples=3)
+            self.assertIn("imgsz", r)
+            self.assertIn("epochs", r)
+            self.assertIn("val_split", r)
+            self.assertIn("note", r)
+            self.assertGreaterEqual(r["imgsz"], 320)
+            self.assertLessEqual(r["imgsz"], 1280)
+
+
 class TestROI(unittest.TestCase):
     """Test ROI extraction for large images."""
 

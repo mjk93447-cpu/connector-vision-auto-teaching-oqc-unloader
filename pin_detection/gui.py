@@ -90,6 +90,7 @@ STEP 4: Training parameters
   • Epochs: Number of training passes (100–200 typical). More = better but slower.
   • Image size (imgsz): Input resolution. 640–1280 for small pins. Larger = more accurate but slower.
   • Workers: Data loading threads. Set to match your CPU cores for faster training.
+  • Suggested: After selecting folders, click "Apply suggested" to auto-set imgsz, epochs, val_split based on dataset scan.
 
 STEP 5: Start training
   • Click "Start training". The graph shows Loss, Precision, and Recall during training.
@@ -224,6 +225,15 @@ class PinDetectionGUI:
         self.eta_label.grid(row=row, column=1, columnspan=2, sticky=tk.W, padx=4, pady=2)
         row += 1
 
+        ttk.Label(train_f, text="Suggested:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        sug_f = ttk.Frame(train_f)
+        sug_f.grid(row=row, column=1, columnspan=2, sticky=tk.W, padx=4, pady=2)
+        self.suggested_label = ttk.Label(sug_f, text="—", foreground="gray")
+        self.suggested_label.pack(side=tk.LEFT)
+        self.apply_suggested_btn = ttk.Button(sug_f, text="Apply suggested", command=self._on_apply_suggested, state=tk.DISABLED)
+        self.apply_suggested_btn.pack(side=tk.LEFT, padx=8)
+        row += 1
+
         self.train_progress = ttk.Progressbar(train_f, mode="indeterminate")
         self.train_progress.grid(row=row, column=0, columnspan=3, sticky=tk.EW, pady=8)
         row += 1
@@ -320,9 +330,12 @@ class PinDetectionGUI:
         if not u or not m:
             self.dataset_label.config(text="—")
             self.eta_label.config(text="—")
+            self.suggested_label.config(text="—")
+            self.apply_suggested_btn.config(state=tk.DISABLED)
+            self._suggested = None
             return
         try:
-            from .dataset import IMG_EXTS
+            from .dataset import IMG_EXTS, analyze_dataset_for_training
             from .train import _default_workers
             pu, pm = Path(u), Path(m)
             u_files = [f for f in pu.iterdir() if f.suffix.lower() in IMG_EXTS]
@@ -337,6 +350,21 @@ class PinDetectionGUI:
                 except Exception:
                     pass
             self.dataset_label.config(text=f"{n} images, {w}×{h} px")
+
+            # Quick scan for suggested params
+            try:
+                suggested = analyze_dataset_for_training(pu, pm, max_samples=5)
+                self._suggested = suggested
+                imgsz = suggested.get("imgsz", 640)
+                epochs = suggested.get("epochs", 100)
+                note = suggested.get("note", "")
+                self.suggested_label.config(text=f"imgsz:{imgsz}, epochs:{epochs}" + (f" ({note})" if note else ""))
+                self.apply_suggested_btn.config(state=tk.NORMAL)
+            except Exception:
+                self._suggested = None
+                self.suggested_label.config(text="—")
+                self.apply_suggested_btn.config(state=tk.DISABLED)
+
             try:
                 workers = int(self.workers_var.get())
             except Exception:
@@ -346,6 +374,19 @@ class PinDetectionGUI:
         except Exception as e:
             self.dataset_label.config(text=str(e)[:40])
             self.eta_label.config(text="—")
+            self.suggested_label.config(text="—")
+            self.apply_suggested_btn.config(state=tk.DISABLED)
+            self._suggested = None
+
+    def _on_apply_suggested(self):
+        if not getattr(self, "_suggested", None):
+            return
+        s = self._suggested
+        imgsz = min(s.get("imgsz", 640), getattr(self, "_imgsz_max", 1280))
+        self.imgsz_var.set(imgsz)
+        self.epochs_var.set(s.get("epochs", 100))
+        self.val_split_var.set(s.get("val_split", 0.2))
+        self._update_eta()
 
     def _on_train(self):
         u = self.unmasked_dir.get().strip()
