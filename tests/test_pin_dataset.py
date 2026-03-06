@@ -86,6 +86,34 @@ class TestDatasetPairing(unittest.TestCase):
             m = _find_masked_pair(unmasked / "01.jpg", masked)
             self.assertEqual(m.name, "01_masked.jpg")
 
+    def test_find_masked_pair_cross_format_bmp_jpg(self):
+        """Unmasked 2.bmp should pair with masked 2.jpg (cross-format)."""
+        from pin_detection.dataset import _find_masked_pair
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            unmasked = tmp / "unmasked"
+            masked = tmp / "masked"
+            unmasked.mkdir()
+            masked.mkdir()
+            (unmasked / "2.bmp").touch()
+            (masked / "2.jpg").touch()
+            m = _find_masked_pair(unmasked / "2.bmp", masked)
+            self.assertEqual(m.name, "2.jpg")
+
+    def test_find_masked_pair_cross_format_jpg_bmp(self):
+        """Unmasked 01.jpg should pair with masked 01.bmp (cross-format)."""
+        from pin_detection.dataset import _find_masked_pair
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            unmasked = tmp / "unmasked"
+            masked = tmp / "masked"
+            unmasked.mkdir()
+            masked.mkdir()
+            (unmasked / "01.jpg").touch()
+            (masked / "01.bmp").touch()
+            m = _find_masked_pair(unmasked / "01.jpg", masked)
+            self.assertEqual(m.name, "01.bmp")
+
     def test_find_masked_pair_missing_raises(self):
         from pin_detection.dataset import _find_masked_pair
         with tempfile.TemporaryDirectory() as tmp:

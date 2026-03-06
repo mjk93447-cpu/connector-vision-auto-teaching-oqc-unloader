@@ -107,13 +107,28 @@ def get_dataset_info(data_yaml: Path) -> dict:
 
 
 def _find_masked_pair(unmasked_path: Path, masked_dir: Path) -> Path:
-    """Find masked file for unmasked (same name or stem_masked.suffix)."""
+    """
+    Find masked file for unmasked image.
+    Supports cross-format pairing: unmasked 2.bmp <-> masked 2.jpg
+    Priority: 1) exact name 2) stem_masked.suffix 3) stem + any IMG_EXTS
+    """
+    stem = unmasked_path.stem
+    # 1) Exact match
     m = masked_dir / unmasked_path.name
     if m.exists():
         return m
-    m2 = masked_dir / f"{unmasked_path.stem}_masked{unmasked_path.suffix}"
+    # 2) stem_masked.suffix (e.g. 2_masked.bmp)
+    m2 = masked_dir / f"{stem}_masked{unmasked_path.suffix}"
     if m2.exists():
         return m2
+    # 3) stem + other extensions (bmp/jpg cross-pairing)
+    for ext in IMG_EXTS:
+        cand = masked_dir / f"{stem}{ext}"
+        if cand.exists():
+            return cand
+        cand2 = masked_dir / f"{stem}_masked{ext}"
+        if cand2.exists():
+            return cand2
     raise FileNotFoundError(f"Masked pair not found for {unmasked_path.name}")
 
 
