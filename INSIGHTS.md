@@ -130,8 +130,34 @@ GT(ground truth) 있을 때 `compute_boundary_optimized_score`:
 
 `tools.py tune --batch` 실행 시 자동 생성. target 0.4/0.5/0.6별 eval_budget, round_size. 필요 시 `legacy/target_score_strategy_config.json` 참고 후 재실행으로 복구.
 
-## 11. 배포·테스트
+## 11. Pin Detection 성능 지표 (2026-03-05)
+
+- **목표**: Recall 100%, Precision 100% (SPEC_1ST_GOAL, ROADMAP §6.3)
+- **현황**: cap_at_20_per_row로 Precision 상한만 적용. Recall/Precision 측정·평가 스크립트 없음.
+- **필수 추가**: `pin eval` (GT vs 추론 Recall/Precision), Validation split, 배치 추론.
+- **상세**: `docs/PIN_DETECTION_ANALYSIS.md`, `ROADMAP.md` §9·§10.
+
+## 12. 배포·테스트
 
 - **테스트**: `run_tests.bat` 또는 `python -m unittest discover`.
 - **푸시**: `push_all.bat` (테스트 → 커밋 → 푸시).
 - **EXE**: GitHub Actions → Artifacts. `release_ver20.bat`으로 태그 푸시.
+
+## 13. EXE/CI 에러 해결 인사이트 (2026-03-07)
+
+### NoneType write (PyInstaller GUI)
+
+- **패턴**: `console=False` EXE에서 `sys.stdout`/`sys.stderr`가 `None` → 라이브러리(Ultralytics 등)가 write 시도 시 크래시.
+- **해결**: 진입점 최상단에서 `if x is None: x = open(os.devnull,'w')` 적용. 반드시 **모든 import 전** 실행.
+- **검증**: `test_exe_stdout_fix.py`로 None 환경 시뮬레이션, `test_exe_train.bat`로 실제 학습 완료 확인.
+
+### CI 전용 실패 (로컬 통과, Actions 실패)
+
+- **패턴**: cwd/sys.path 차이로 import 실패 또는 assert 미처리.
+- **해결**: 테스트 스크립트에서 `sys.path.insert(0, project_root)`, `os.chdir(root)` 명시. assert 대신 `(code, msg)` 반환으로 실패 원인 출력.
+- **워크플로**: `working-directory`, `paths`(트리거)에 `tools_scripts/**` 포함.
+
+### 참고 문서
+
+- `docs/TROUBLESHOOTING.md`: 에러 사례·진단 절차.
+- `docs/EXE_NONETYPE_FIX_PLAN.md`: NoneType 해결 상세.

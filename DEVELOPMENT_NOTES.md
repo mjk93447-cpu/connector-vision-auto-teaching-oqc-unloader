@@ -99,3 +99,28 @@ balanced speed, controllability, and low dependency footprint.
 ## 9. Testing
 - `python3 -m unittest discover`
 - `python3 edge_performance_eval.py` for synthetic stress scenarios.
+
+---
+
+## 10. Pin Detection / EXE Phase (2026-03)
+
+### 10.1 Pin Detection 파이프라인
+
+- YOLO26 기반 커넥터 핀 탐지. 마스킹 전/후 이미지 쌍 → bbox 추출 → 학습.
+- 학습/추론 CLI, GUI(tkinter), PyInstaller EXE 패키징.
+- ROI crop, geometry refinement, 셀 ID(A2HD) 페어링, 단일 엑셀 다중 행 지원.
+
+### 10.2 EXE NoneType write (시행착오)
+
+- **문제**: 오프라인 EXE에서 학습 ~25분 후 `'NoneType' object has no attribute 'write'` 크래시.
+- **시도**: GUI 로그 추가 등 — 근본 원인 미해결.
+- **진단**: PyInstaller `console=False` 시 stdout/stderr가 None. Ultralytics progress bar가 write 시도.
+- **해결**: `run_pin_gui.py` 최상단에서 None이면 devnull로 대체. 모든 import 전 적용.
+- **교훈**: GUI 앱에서 stdout/stderr None은 흔한 패턴. 진입점에서 조기 처리 필수.
+
+### 10.3 CI test_exe_stdout_fix 실패 (시행착오)
+
+- **문제**: 로컬 통과, GitHub Actions에서만 실패.
+- **시도**: 단순 assert — CI 환경 차이로 import 실패 시 원인 불명.
+- **해결**: sys.path/chdir 명시, (code, msg) 반환, working-directory 지정.
+- **교훈**: CI는 cwd·path가 다를 수 있음. 테스트 스크립트가 자체적으로 환경 고정.
