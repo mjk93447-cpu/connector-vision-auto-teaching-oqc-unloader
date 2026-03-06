@@ -8,6 +8,7 @@ on:
       - "pin_detection/**"
       - "run_pin_gui.py"
       - "requirements-pin.txt"
+      - "pin_detection_gui.spec"
       - ".github/workflows/build-pin-exe.yml"
     tags:
       - "pin-v*"
@@ -25,29 +26,23 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-pin.txt"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pillow openpyxl scipy matplotlib
-          pip install -r requirements-pin.txt
-          pip install pyinstaller
+          pip install --quiet torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install --quiet numpy pillow openpyxl scipy matplotlib
+          pip install --quiet -r requirements-pin.txt
+          pip install --quiet pyinstaller
 
       - name: Run pin_detection import test
         run: python -c "from pin_detection.gui import main; print('OK')"
 
       - name: Build EXE
         shell: cmd
-        run: |
-          pyinstaller --onefile --windowed ^
-            --name pin_detection_gui ^
-            --hidden-import=ultralytics ^
-            --hidden-import=PIL._tkinter_finder ^
-            --hidden-import=matplotlib ^
-            --collect-all=ultralytics ^
-            --collect-all=numpy ^
-            --collect-all=PIL ^
-            run_pin_gui.py
+        run: pyinstaller --noconfirm --log-level WARN pin_detection_gui.spec
 
       - name: Upload artifact
         if: "!startsWith(github.ref, 'refs/tags/')"

@@ -19,7 +19,7 @@ ENV/
 dist/
 build/
 *.spec
-pin_detection_gui.spec
+!pin_detection_gui.spec
 
 # Project outputs
 outputs/
