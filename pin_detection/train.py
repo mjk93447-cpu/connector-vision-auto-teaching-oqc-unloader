@@ -3,6 +3,7 @@ Train YOLO26 model from masked/unmasked image pairs + Excel.
 Supports 1 pair or 10 pairs (unmasked-dir + masked-dir).
 """
 import os
+import threading
 from pathlib import Path
 
 from ultralytics import YOLO
@@ -25,6 +26,7 @@ def train_pin_model(
     imgsz: int = 640,
     workers: int | None = None,
     val_split: float = 0.2,
+    stop_event: threading.Event | None = None,
 ) -> Path:
     """
     Train pin detection model.
@@ -52,6 +54,12 @@ def train_pin_model(
     from ._model_path import get_yolo26n_path
     model = YOLO(get_yolo26n_path())  # nano, bundled in EXE for offline
     n_workers = workers if workers is not None else _default_workers()
+
+    def _on_epoch_end(trainer):
+        if stop_event and stop_event.is_set():
+            trainer.stop_training = True
+    if stop_event:
+        model.add_callback("on_train_epoch_end", _on_epoch_end)
 
     # Recall: 20+20 pins must not be missed. Precision: no over-detection.
     results = model.train(

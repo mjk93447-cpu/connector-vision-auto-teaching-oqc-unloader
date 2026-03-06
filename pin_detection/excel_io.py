@@ -34,11 +34,13 @@ def load_excel_format(excel_path: str | Path) -> Dict[str, Any]:
 def infer_column_indices(headers: List[str]) -> Dict[str, int]:
     """
     Infer column indices from headers.
-    Common names: 위핀, 아래핀, 위핀개수, 아래핀개수, OK, NG, 판정, 좌우간격, spacing, etc.
+    Korean: 위핀, 아래핀, 위핀개수, 아래핀개수, OK, NG, 판정, 좌우간격, spacing.
+    English: upper, lower, upper_count, lower_count, judgment, spacing.
     """
     mapping = {}
     for i, h in enumerate(headers):
-        h_lower = h.lower().replace(" ", "")
+        h_lower = h.lower().replace(" ", "").replace("_", "")
+        # Korean
         if "위" in h and ("핀" in h or "개" in h):
             mapping["upper_count"] = i
         elif "아래" in h and ("핀" in h or "개" in h):
@@ -47,6 +49,13 @@ def infer_column_indices(headers: List[str]) -> Dict[str, int]:
             mapping["judgment"] = i
         elif "간격" in h or "spacing" in h_lower or "거리" in h:
             mapping["spacing"] = i
+        # English
+        if "upper" in h_lower and ("count" in h_lower or "pin" in h_lower or "num" in h_lower):
+            mapping["upper_count"] = i
+        elif "lower" in h_lower and ("count" in h_lower or "pin" in h_lower or "num" in h_lower):
+            mapping["lower_count"] = i
+        elif "judgment" in h_lower or "result" in h_lower or "verdict" in h_lower:
+            mapping["judgment"] = i
     return mapping
 
 

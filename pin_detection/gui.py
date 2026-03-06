@@ -199,6 +199,13 @@ class PinDetectionGUI:
         ttk.Label(train_f, text="(data loading threads)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
 
+        ttk.Label(train_f, text="Val split:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.val_split_var = tk.DoubleVar(value=0.2)
+        sb_val = ttk.Spinbox(train_f, from_=0.01, to=0.5, increment=0.05, textvariable=self.val_split_var, width=8)
+        sb_val.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
+        ttk.Label(train_f, text="(0.1–0.3 typical)").grid(row=row, column=2, sticky=tk.W, pady=2)
+        row += 1
+
         # Hardware & ETA
         ttk.Label(train_f, text="CPU:").grid(row=row, column=0, sticky=tk.W, pady=2)
         self.cpu_label = ttk.Label(train_f, text=_get_cpu_info())
@@ -229,8 +236,12 @@ class PinDetectionGUI:
         self.graph_frame = graph_f
         row += 1
 
-        self.train_btn = ttk.Button(train_f, text="Start training", command=self._on_train)
-        self.train_btn.grid(row=row, column=1, pady=12)
+        btn_f = ttk.Frame(train_f)
+        btn_f.grid(row=row, column=1, pady=12)
+        self.train_btn = ttk.Button(btn_f, text="Start training", command=self._on_train)
+        self.train_btn.pack(side=tk.LEFT, padx=4)
+        self.stop_btn = ttk.Button(btn_f, text="Stop training", command=self._on_stop_train, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=4)
 
         train_f.columnconfigure(1, weight=1)
 
@@ -257,10 +268,22 @@ class PinDetectionGUI:
         ttk.Entry(inf_f, textvariable=self.excel_format, width=50).grid(row=3, column=1, padx=4, pady=2)
         ttk.Button(inf_f, text="Browse", command=lambda: self.excel_format.set(_select_file(self.root, "Excel", [("Excel", "*.xlsx *.xls")]))).grid(row=3, column=2, pady=2)
 
-        self.inference_status = ttk.Label(inf_f, text="")
-        self.inference_status.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=8)
+        ttk.Label(inf_f, text="Output folder (optional):").grid(row=4, column=0, sticky=tk.W, pady=2)
+        self.inference_output_dir = tk.StringVar()
+        ttk.Entry(inf_f, textvariable=self.inference_output_dir, width=50).grid(row=4, column=1, padx=4, pady=2)
+        ttk.Button(inf_f, text="Browse", command=lambda: self.inference_output_dir.set(_select_dir(self.root, "Output folder") or self.inference_output_dir.get())).grid(row=4, column=2, pady=2)
+        ttk.Label(inf_f, text="(empty = same as input image)", font=("Segoe UI", 8), foreground="gray").grid(row=5, column=1, sticky=tk.W, padx=4)
 
-        ttk.Button(inf_f, text="Run inference", command=self._on_inference).grid(row=5, column=1, pady=12)
+        ttk.Label(inf_f, text="Confidence threshold:").grid(row=6, column=0, sticky=tk.W, pady=2)
+        self.conf_var = tk.DoubleVar(value=0.25)
+        sb_conf = ttk.Spinbox(inf_f, from_=0.01, to=0.5, increment=0.05, textvariable=self.conf_var, width=8)
+        sb_conf.grid(row=6, column=1, sticky=tk.W, padx=4, pady=2)
+        ttk.Label(inf_f, text="(0.01–0.5, lower=more recall)").grid(row=6, column=2, sticky=tk.W, pady=2)
+
+        self.inference_status = ttk.Label(inf_f, text="")
+        self.inference_status.grid(row=7, column=0, columnspan=3, sticky=tk.W, pady=8)
+
+        ttk.Button(inf_f, text="Run inference", command=self._on_inference).grid(row=8, column=1, pady=12)
 
         # Help tab
         help_f = ttk.Frame(nb, padding=8)
@@ -331,6 +354,7 @@ class PinDetectionGUI:
 
         self._train_stop.clear()
         self.train_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
 
         def run():
             try:
@@ -344,7 +368,12 @@ class PinDetectionGUI:
                 out_dir = self.output_dir.get()
                 dataset_dir = Path(out_dir) / "dataset"
                 dataset_dir.mkdir(parents=True, exist_ok=True)
-                data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir)
+                try:
+                    val_split = float(self.val_split_var.get())
+                    val_split = max(0.01, min(0.5, val_split))
+                except Exception:
+                    val_split = 0.2
+                data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split)
 
                 # Start graph poll in main thread
                 save_dir = Path(out_dir) / "pin_run"
@@ -369,6 +398,8 @@ class PinDetectionGUI:
                     epochs=self.epochs_var.get(),
                     imgsz=imgsz,
                     workers=workers,
+                    val_split=val_split,
+                    stop_event=self._train_stop,
                 )
 
                 self.root.after(0, lambda: self._stop_graph_poll())
@@ -383,8 +414,13 @@ class PinDetectionGUI:
                 self.root.after(0, lambda: self.train_progress.stop())
                 self.root.after(0, lambda: self.status_var.set("Ready"))
                 self.root.after(0, lambda: self.train_btn.config(state=tk.NORMAL))
+                self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _on_stop_train(self):
+        self._train_stop.set()
+        self.train_status.config(text="Stopping at end of epoch...")
 
     def _start_graph_poll(self, save_dir: Path):
         """Poll results.csv and update graph."""
@@ -467,16 +503,27 @@ class PinDetectionGUI:
             messagebox.showerror("Error", "Select image and model path.")
             return
 
+        out_dir = self.inference_output_dir.get().strip()
+        base_dir = Path(out_dir) if out_dir else Path(img_path).parent
+        out_img_path = base_dir / f"{Path(img_path).stem}_masked.png"
+        excel_out = base_dir / "result.xlsx"
+        try:
+            conf = float(self.conf_var.get())
+            conf = max(0.01, min(0.5, conf))
+        except Exception:
+            conf = 0.25
+
         def run():
             try:
                 self.root.after(0, lambda: self.status_var.set("Inference..."))
                 self.root.after(0, lambda: self.inference_status.config(text="Processing..."))
 
+                base_dir.mkdir(parents=True, exist_ok=True)
                 img, detections, masked = run_inference(
                     model_path=model_path,
                     image_path=img_path,
-                    output_image_path=Path(img_path).parent / f"{Path(img_path).stem}_masked.png",
-                    conf_threshold=0.25,
+                    output_image_path=out_img_path,
+                    conf_threshold=conf,
                 )
                 h, w = img.shape[:2]
                 upper, lower = split_upper_lower(detections)
@@ -488,7 +535,6 @@ class PinDetectionGUI:
                 if ef:
                     format_ref = load_excel_format(ef)
 
-                excel_out = Path(img_path).parent / "result.xlsx"
                 write_result_excel(
                     excel_out,
                     upper_count=len(upper),
@@ -498,9 +544,8 @@ class PinDetectionGUI:
                     format_ref=format_ref,
                 )
 
-                out_img = Path(img_path).parent / f"{Path(img_path).stem}_masked.png"
                 ok = len(upper) == 20 and len(lower) == 20
-                msg = f"Upper: {len(upper)}, Lower: {len(lower)} → {'OK' if ok else 'NG'}\nImage: {out_img}\nExcel: {excel_out}"
+                msg = f"Upper: {len(upper)}, Lower: {len(lower)} → {'OK' if ok else 'NG'}\nImage: {out_img_path}\nExcel: {excel_out}"
                 self.root.after(0, lambda: self.inference_status.config(text=msg))
                 self.root.after(0, lambda: messagebox.showinfo("Done", msg))
             except Exception as e:
