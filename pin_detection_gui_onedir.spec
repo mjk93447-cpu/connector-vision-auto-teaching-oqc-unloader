@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
+# One-dir build — DLL in same folder as exe. Use when one-file has permission issues.
+# Output: dist/pin_detection_gui/pin_detection_gui.exe + _internal/
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
 hiddenimports = ['ultralytics', 'PIL._tkinter_finder', 'matplotlib']
-# Bundle yolo26n.pt for offline training (build workflow downloads to models/)
 if Path('models/yolo26n.pt').exists():
     datas.append(('models/yolo26n.pt', 'models'))
 tmp_ret = collect_all('ultralytics')
@@ -14,7 +15,6 @@ tmp_ret = collect_all('numpy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PIL')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
 
 a = Analysis(
     ['run_pin_gui.py'],
@@ -35,25 +35,25 @@ a = Analysis(
     optimize=0,
 )
 pyz = PYZ(a.pure)
-
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='pin_detection_gui',
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    uac_admin=False,  # asInvoker — no admin required (EXE_ARTIFACT_ISSUES #1)
+    uac_admin=False,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='pin_detection_gui',
 )

@@ -190,10 +190,11 @@ class PinDetectionGUI:
         sb_epochs.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
         row += 1
 
-        ttk.Label(train_f, text="Image size (imgsz):").grid(row=row, column=0, sticky=tk.W, pady=2)
-        sb_imgsz = ttk.Spinbox(train_f, from_=320, to=self._imgsz_max, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
-        sb_imgsz.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
-        ttk.Label(train_f, text="(640–1280 for small pins)").grid(row=row, column=2, sticky=tk.W, pady=2)
+        # imgsz: ROI off (10.18) → fixed 640, no user input to avoid lag. Hidden per EXE_ARTIFACT_ISSUES.
+        self._imgsz_frame = ttk.Frame(train_f)
+        self._imgsz_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=2)
+        ttk.Label(self._imgsz_frame, text="Image size:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(self._imgsz_frame, text="640 (fixed, ROI off)", foreground="gray").grid(row=0, column=1, sticky=tk.W, padx=4)
         row += 1
 
         ttk.Label(train_f, text="Workers:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -277,8 +278,8 @@ class PinDetectionGUI:
 
         train_f.columnconfigure(1, weight=1)
 
-        # Bind spinbox for ETA update
-        for c in [sb_epochs, sb_imgsz, sb_workers]:
+        # Bind spinbox for ETA update (imgsz removed — fixed 640, ROI off)
+        for c in [sb_epochs, sb_workers]:
             c.bind("<KeyRelease>", lambda e: self._update_eta())
 
         # Inference tab
@@ -345,6 +346,7 @@ class PinDetectionGUI:
             self._update_eta()
 
     def _update_eta(self):
+        """Quick update: n_images, w×h, ETA. No heavy analyze (runs in background)."""
         u = self.unmasked_dir.get().strip()
         m = self.masked_dir.get().strip()
         if not u or not m:
@@ -353,9 +355,10 @@ class PinDetectionGUI:
             self.suggested_label.config(text="—")
             self.apply_suggested_btn.config(state=tk.DISABLED)
             self._suggested = None
+            self._scan_cancel = True
             return
         try:
-            from .dataset import IMG_EXTS, analyze_dataset_for_training
+            from .dataset import IMG_EXTS
             from .train import _default_workers
             pu, pm = Path(u), Path(m)
             u_files = [f for f in pu.iterdir() if f.suffix.lower() in IMG_EXTS]
@@ -371,27 +374,35 @@ class PinDetectionGUI:
                     pass
             self.dataset_label.config(text=f"{n} images, {w}×{h} px")
 
-            # Quick scan for suggested params
-            try:
-                suggested = analyze_dataset_for_training(pu, pm, max_samples=5)
-                self._suggested = suggested
-                imgsz = suggested.get("imgsz", 640)
-                epochs = suggested.get("epochs", 3)
-                mosaic = suggested.get("mosaic", 0.0)
-                note = suggested.get("note", "")
-                self.suggested_label.config(text=f"imgsz:{imgsz}, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
-                self.apply_suggested_btn.config(state=tk.NORMAL)
-            except Exception:
-                self._suggested = None
-                self.suggested_label.config(text="—")
-                self.apply_suggested_btn.config(state=tk.DISABLED)
-
+            # ETA only — no analyze (avoids 2min freeze, EXE_ARTIFACT_ISSUES #2)
             try:
                 workers = int(self.workers_var.get())
             except Exception:
                 workers = _default_workers()
-            sec = _estimate_training_time(n, self.imgsz_var.get(), self.epochs_var.get(), workers)
+            imgsz = 640  # fixed, ROI off (10.18)
+            sec = _estimate_training_time(n, imgsz, self.epochs_var.get(), workers)
             self.eta_label.config(text=_format_duration(sec))
+
+            # Start background scan for "Apply suggested" (non-blocking, EXE_ARTIFACT_ISSUES #2)
+            self._scan_cancel = True  # cancel any in-flight scan before starting new one
+            self._scan_paths = (u, m)
+            self._scan_cancel = False
+            self.suggested_label.config(text="Scanning...")
+            self.apply_suggested_btn.config(state=tk.DISABLED)
+
+            def _scan():
+                try:
+                    from .dataset import analyze_dataset_for_training
+                    s = analyze_dataset_for_training(pu, pm, max_samples=3)
+                    if getattr(self, "_scan_cancel", True):
+                        return
+                    self.root.after(0, lambda: self._on_scan_done(s, (u, m)))
+                except Exception:
+                    if not getattr(self, "_scan_cancel", True):
+                        self.root.after(0, lambda: self._on_scan_done(None, (u, m)))
+
+            t = threading.Thread(target=_scan, daemon=True)
+            t.start()
         except Exception as e:
             self.dataset_label.config(text=str(e)[:40])
             self.eta_label.config(text="—")
@@ -399,12 +410,27 @@ class PinDetectionGUI:
             self.apply_suggested_btn.config(state=tk.DISABLED)
             self._suggested = None
 
+    def _on_scan_done(self, suggested: dict | None, scan_paths: tuple):
+        """Called from main thread after background scan."""
+        if scan_paths != getattr(self, "_scan_paths", None):
+            return  # folders changed, ignore stale result
+        if suggested is None:
+            self.suggested_label.config(text="—")
+            self.apply_suggested_btn.config(state=tk.DISABLED)
+            self._suggested = None
+            return
+        self._suggested = suggested
+        epochs = suggested.get("epochs", 3)
+        mosaic = suggested.get("mosaic", 0.0)
+        note = suggested.get("note", "")
+        self.suggested_label.config(text=f"imgsz:640, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
+        self.apply_suggested_btn.config(state=tk.NORMAL)
+
     def _on_apply_suggested(self):
         if not getattr(self, "_suggested", None):
             return
         s = self._suggested
-        imgsz = min(s.get("imgsz", 640), getattr(self, "_imgsz_max", 1280))
-        self.imgsz_var.set(imgsz)
+        self.imgsz_var.set(640)  # fixed, ROI off
         self.epochs_var.set(s.get("epochs", 3))
         self.val_split_var.set(s.get("val_split", 0.2))
         self.mosaic_var.set(s.get("mosaic", 0.0))
