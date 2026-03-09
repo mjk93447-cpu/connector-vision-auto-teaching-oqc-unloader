@@ -29,6 +29,9 @@ if __name__ == "__main__":
         root = Path.cwd()
         unmasked = root / "test_data" / "pin_synthetic" / "unmasked"
         masked = root / "test_data" / "pin_synthetic" / "masked"
+        if not unmasked.exists():
+            unmasked = root / "test_data" / "pin_synthetic" / "train" / "unmasked"
+            masked = root / "test_data" / "pin_synthetic" / "train" / "masked"
         out = root / "pin_models_exe_test"
         if unmasked.exists() and masked.exists():
             from pin_detection.train import train_pin_model

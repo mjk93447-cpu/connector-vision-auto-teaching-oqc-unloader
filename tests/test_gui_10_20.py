@@ -88,6 +88,27 @@ def test_imgsz_no_cap():
     assert t2000 > t1280 > t640
 
 
+def test_graph_poll_candidates():
+    """Test graph poll finds results.csv in output_dir/pin_run or runs/detect."""
+    from pathlib import Path
+    import tempfile
+    from pin_detection.gui import PinDetectionGUI
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    app = PinDetectionGUI(root)
+    # Simulate candidates
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "pin_run"
+        out.mkdir()
+        (out / "results.csv").write_text("epoch,train/box_loss\n1,1.5\n")
+        app._graph_save_dir = [out]
+        app._poll_graph()
+        assert len(app._graph_data) >= 1
+    root.destroy()
+
+
 def test_add_one_pair_with_roi():
     """Test _add_one_pair with user roi."""
     from pin_detection.dataset import _add_one_pair

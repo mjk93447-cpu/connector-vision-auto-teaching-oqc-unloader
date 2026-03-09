@@ -521,9 +521,12 @@ class PinDetectionGUI:
                     val_split = 0.2
                 data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split, use_roi=False)
 
-                # Start graph poll: YOLO saves to runs/detect/<project>/pin_run
-                save_dir = Path("runs") / "detect" / Path(out_dir).name / "pin_run"
-                self._start_graph_poll(save_dir)
+                # Start graph poll: YOLO saves to output_dir/pin_run (abs path) or runs/detect/<name>/pin_run (rel)
+                candidates = [
+                    Path(out_dir) / "pin_run",
+                    Path("runs") / "detect" / Path(out_dir).name / "pin_run",
+                ]
+                self._start_graph_poll(candidates)
 
                 try:
                     workers = int(self.workers_var.get())
@@ -571,8 +574,8 @@ class PinDetectionGUI:
         self._train_stop.set()
         self.train_status.config(text="Stopping at end of epoch...")
 
-    def _start_graph_poll(self, save_dir: Path):
-        """Poll results.csv and update graph + log."""
+    def _start_graph_poll(self, save_dir: Path | list[Path]):
+        """Poll results.csv and update graph + log. save_dir can be Path or list of candidate Paths."""
         self._graph_data = []
         self._graph_start_time = time.time()
         try:
@@ -589,7 +592,7 @@ class PinDetectionGUI:
             self._graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         except ImportError:
             self._graph_canvas = None
-        self._graph_save_dir = save_dir
+        self._graph_save_dir = save_dir if isinstance(save_dir, list) else [save_dir]
         self._graph_poll_id = None
         self._last_logged_epoch = -1
         self._update_train_log("Preparing dataset...", clear=True)
@@ -609,45 +612,48 @@ class PinDetectionGUI:
         self.root.after(0, _do)
 
     def _poll_graph(self):
-        csv_path = getattr(self, "_graph_save_dir", None)
+        candidates = getattr(self, "_graph_save_dir", None) or []
+        csv_path = None
+        for d in candidates:
+            p = Path(d) / "results.csv"
+            if p.exists():
+                csv_path = p
+                break
         if csv_path:
-            csv_path = csv_path / "results.csv"
-            if csv_path.exists():
-                try:
-                    import csv
-                    with open(csv_path) as f:
-                        r = csv.DictReader(f)
-                        rows = list(r)
-                    if rows:
-                        self._graph_data = rows
-                        if getattr(self, "_graph_canvas", None):
-                            self._draw_graph()
-                        # Update log: latest epoch, ETA (only when epoch changes)
-                        last = rows[-1]
-                        ep = int(last.get("epoch", len(rows)))
-                        if ep != getattr(self, "_last_logged_epoch", -1):
-                            self._last_logged_epoch = ep
-                            box = last.get("train/box_loss") or last.get("train_box_loss") or ""
-                            prec = last.get("metrics/precision(B)") or last.get("metrics_precision(B)") or ""
-                            rec = last.get("metrics/recall(B)") or last.get("metrics_recall(B)") or ""
-                            epochs_total = 3
-                            try:
-                                epochs_total = int(self.epochs_var.get())
-                            except Exception:
-                                pass
-                            eta = ""
-                            try:
-                                elapsed = time.time() - getattr(self, "_graph_start_time", time.time())
-                                if ep > 0 and elapsed > 0:
-                                    sec_per_ep = elapsed / ep
-                                    remaining = (epochs_total - ep) * sec_per_ep
-                                    eta = f"ETA ~{int(remaining)}s"
-                            except Exception:
-                                pass
-                            log_line = f"Epoch {ep}/{epochs_total}: loss={box[:6] if box else '-'} P={prec[:5] if prec else '-'} R={rec[:5] if rec else '-'} {eta}"
-                            self._update_train_log(log_line)
-                except Exception:
-                    pass
+            try:
+                import csv
+                with open(csv_path) as f:
+                    r = csv.DictReader(f)
+                    rows = list(r)
+                if rows:
+                    self._graph_data = rows
+                    if getattr(self, "_graph_canvas", None):
+                        self._draw_graph()
+                    last = rows[-1]
+                    ep = int(last.get("epoch", len(rows)))
+                    if ep != getattr(self, "_last_logged_epoch", -1):
+                        self._last_logged_epoch = ep
+                        box = last.get("train/box_loss") or last.get("train_box_loss") or ""
+                        prec = last.get("metrics/precision(B)") or last.get("metrics_precision(B)") or ""
+                        rec = last.get("metrics/recall(B)") or last.get("metrics_recall(B)") or ""
+                        epochs_total = 3
+                        try:
+                            epochs_total = int(self.epochs_var.get())
+                        except Exception:
+                            pass
+                        eta = ""
+                        try:
+                            elapsed = time.time() - getattr(self, "_graph_start_time", time.time())
+                            if ep > 0 and elapsed > 0:
+                                sec_per_ep = elapsed / ep
+                                remaining = (epochs_total - ep) * sec_per_ep
+                                eta = f"ETA ~{int(remaining)}s"
+                        except Exception:
+                            pass
+                        log_line = f"Epoch {ep}/{epochs_total}: loss={box[:6] if box else '-'} P={prec[:5] if prec else '-'} R={rec[:5] if rec else '-'} {eta}"
+                        self._update_train_log(log_line)
+            except Exception:
+                pass
         self._graph_poll_id = self.root.after(1000, self._poll_graph)
 
     def _draw_graph(self):
