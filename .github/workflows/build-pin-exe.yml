@@ -9,6 +9,7 @@ on:
       - "run_pin_gui.py"
       - "requirements-pin.txt"
       - "pin_detection_gui.spec"
+      - "pin_detection_gui_debug.spec"
       - "tools_scripts/**"
       - ".github/workflows/build-pin-exe.yml"
     tags:
@@ -51,16 +52,30 @@ jobs:
         run: python tools_scripts/repro_exe_train_crash.py
         working-directory: ${{ github.workspace }}
 
+      - name: Generate large factory data (5000×4000, 20 imgs)
+        run: python tools_scripts/generate_pin_test_data.py --output-dir test_data/pin_large_factory --large-factory
+        working-directory: ${{ github.workspace }}
+
+      - name: Test EXE large train (5000×4000 + roi_map, frozen mode)
+        run: python tools_scripts/test_exe_large_train.py
+        working-directory: ${{ github.workspace }}
+
       - name: Build EXE
         shell: cmd
         run: pyinstaller --noconfirm --log-level WARN pin_detection_gui.spec
+
+      - name: Build debug EXE (console=True for crash diagnosis)
+        shell: cmd
+        run: pyinstaller --noconfirm --log-level WARN pin_detection_gui_debug.spec
 
       - name: Upload artifact
         if: "!startsWith(github.ref, 'refs/tags/')"
         uses: actions/upload-artifact@v4
         with:
           name: pin_detection_gui_windows
-          path: dist/pin_detection_gui.exe
+          path: |
+            dist/pin_detection_gui.exe
+            dist/pin_detection_gui_debug.exe
 
       - name: Create Release and upload EXE
         if: startsWith(github.ref, 'refs/tags/')

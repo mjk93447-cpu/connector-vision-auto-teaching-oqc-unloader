@@ -27,6 +27,7 @@ build/
 *.spec
 !pin_detection_gui.spec
 !pin_detection_gui_onedir.spec
+!pin_detection_gui_debug.spec
 
 # Project outputs
 outputs/
@@ -37,6 +38,8 @@ score_penalty_analysis_out/
 # Pin detection
 pin_models/
 pin_models_test/
+pin_models_exe_large_test/
+pin_models_exe_gui_repro/
 models/
 pin_eval_results/
 runs/
