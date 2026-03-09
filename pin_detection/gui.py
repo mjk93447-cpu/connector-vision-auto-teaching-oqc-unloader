@@ -88,11 +88,16 @@ STEP 3: Output folder
 
 STEP 4: Training parameters
   • Epochs: Number of training passes (100–200 typical). More = better but slower.
-  • Image size (imgsz): Input resolution. 640–1280 for small pins. Larger = more accurate but slower.
+  • Image size (imgsz): Input resolution. 320–4096, no cap. Larger = more accurate but slower.
   • Workers: Data loading threads. Set to match your CPU cores for faster training.
   • Suggested: After selecting folders, click "Apply suggested" to auto-set imgsz, epochs, val_split based on dataset scan.
 
-STEP 5: Start training
+STEP 5: ROI Editor (optional, for large images)
+  • Click "Edit ROI" to manually draw a rectangle per image. Use Prev/Next or Left/Right keys.
+  • Drag on the image to select the pin region. Click "Save ROI map" to save roi_map.json.
+  • Training will use your ROI when roi_map.json exists in the output folder.
+
+STEP 6: Start training
   • Click "Start training". The graph shows Loss, Precision, and Recall during training.
   • When done, the model path appears in the Inference tab.
 
@@ -481,9 +486,15 @@ class PinDetectionGUI:
         try:
             from .dataset import IMG_EXTS
             pu, pm = Path(u), Path(m)
+            if not pu.exists() or not pu.is_dir():
+                messagebox.showerror("Error", f"Unmasked folder does not exist: {u}")
+                return
+            if not pm.exists() or not pm.is_dir():
+                messagebox.showerror("Error", f"Masked folder does not exist: {m}")
+                return
             u_files = [f for f in pu.iterdir() if f.suffix.lower() in IMG_EXTS]
             if not u_files:
-                messagebox.showerror("Error", f"No images in {u}")
+                messagebox.showerror("Error", f"No images in {u}. Use .jpg, .png, .bmp.")
                 return
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -494,8 +505,23 @@ class PinDetectionGUI:
     def _on_train(self):
         u = self.unmasked_dir.get().strip()
         m = self.masked_dir.get().strip()
+        out = self.output_dir.get().strip()
         if not u or not m:
             messagebox.showerror("Error", "Select unmasked and masked folders.")
+            return
+        if not out:
+            messagebox.showerror("Error", "Select output folder first.")
+            return
+        try:
+            pu, pm, po = Path(u), Path(m), Path(out)
+            if not pu.exists() or not pu.is_dir():
+                messagebox.showerror("Error", f"Unmasked folder does not exist: {u}")
+                return
+            if not pm.exists() or not pm.is_dir():
+                messagebox.showerror("Error", f"Masked folder does not exist: {m}")
+                return
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
             return
 
         self._train_stop.clear()

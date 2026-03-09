@@ -65,7 +65,7 @@ def run_roi_editor(
     roi_map = load_roi_map(roi_map_path)
 
     root = tk.Toplevel(parent) if parent else tk.Toplevel()
-    root.title("ROI Editor — Draw rectangle per image")
+    root.title("ROI Editor — Draw ROI per image (drag to select, Prev/Next to navigate)")
     root.geometry("900x700")
     root.minsize(600, 400)
 
@@ -213,6 +213,7 @@ def run_roi_editor(
     ttk.Button(nav_f, text="Next", command=lambda: _go(1)).pack(side=tk.LEFT, padx=4)
     nav_label = tk.Label(nav_f, text="", font=("Segoe UI", 10))
     nav_label.pack(side=tk.LEFT, padx=12)
+    tk.Label(nav_f, text="(Left/Right keys)", font=("Segoe UI", 8), foreground="gray").pack(side=tk.LEFT)
     ttk.Button(nav_f, text="Clear ROI", command=_clear_current).pack(side=tk.RIGHT, padx=4)
     ttk.Button(nav_f, text="Save ROI map", command=_save).pack(side=tk.RIGHT, padx=4)
 
