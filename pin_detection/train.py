@@ -1,8 +1,13 @@
 """
 Train YOLO26 model from masked/unmasked image pairs.
 Supports 1 pair or 10 pairs (unmasked-dir + masked-dir).
+
+EXE fix (Action #24): PyInstaller EXE + workers>0 causes silent crash on Windows
+when dataset prep completes and model.train() spawns DataLoader workers.
+Use workers=0 in frozen/EXE mode to avoid multiprocessing spawn.
 """
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Callable
@@ -12,6 +17,8 @@ from ultralytics import YOLO
 
 def _default_workers() -> int:
     """Use multi-core for data loading. Cap at 4 on Windows for spawn stability."""
+    if getattr(sys, "frozen", False):
+        return 0  # EXE: multiprocessing spawn crashes silently (Action #24)
     n = os.cpu_count() or 4
     return min(n, 4)
 
@@ -62,6 +69,8 @@ def train_pin_model(
     from ._model_path import get_yolo26n_path
     model = YOLO(get_yolo26n_path())  # nano, bundled in EXE for offline
     n_workers = workers if workers is not None else _default_workers()
+    if getattr(sys, "frozen", False) and n_workers > 0:
+        n_workers = 0  # EXE: force 0 to avoid multiprocessing crash (Action #24)
 
     def _on_epoch_end(trainer):
         if stop_event and stop_event.is_set():

@@ -47,6 +47,10 @@ jobs:
       - name: Download yolo26n.pt for offline bundle
         run: python -c "from pathlib import Path; from ultralytics.utils.downloads import attempt_download_asset; Path('models').mkdir(exist_ok=True); attempt_download_asset(Path('models')/'yolo26n.pt')"
 
+      - name: Test Action #24 crash fix (frozen workers=0)
+        run: python tools_scripts/repro_exe_train_crash.py
+        working-directory: ${{ github.workspace }}
+
       - name: Build EXE
         shell: cmd
         run: pyinstaller --noconfirm --log-level WARN pin_detection_gui.spec

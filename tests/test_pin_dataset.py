@@ -390,5 +390,28 @@ class TestRealisticGenerator(unittest.TestCase):
         self.assertEqual(len(bboxes_out), 40, "Green only on real pins")
 
 
+class TestTrainEXEFix(unittest.TestCase):
+    """Action #24: workers=0 when sys.frozen (EXE multiprocessing crash)."""
+
+    def test_default_workers_frozen_is_zero(self):
+        import sys
+        from pin_detection.train import _default_workers
+        orig = getattr(sys, "frozen", None)
+        try:
+            sys.frozen = True
+            self.assertEqual(_default_workers(), 0)
+        finally:
+            if orig is None and hasattr(sys, "frozen"):
+                del sys.frozen
+            elif orig is not None:
+                sys.frozen = orig
+
+    def test_default_workers_normal(self):
+        from pin_detection.train import _default_workers
+        n = _default_workers()
+        self.assertGreaterEqual(n, 0)
+        self.assertLessEqual(n, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
