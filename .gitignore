@@ -26,6 +26,7 @@ dist/
 build/
 *.spec
 !pin_detection_gui.spec
+!pin_detection_gui_onedir.spec
 
 # Project outputs
 outputs/
