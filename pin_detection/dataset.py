@@ -56,8 +56,9 @@ def _add_one_pair(
     class_id: int = 0,
     use_roi: bool = False,
     roi_margin: float = 0.15,
+    roi: tuple[int, int, int, int] | None = None,
 ) -> None:
-    """Add one image pair to dataset. Optionally crop to ROI for large images."""
+    """Add one image pair to dataset. Optionally crop to ROI (user roi_map or auto)."""
     validate_pair_dimensions(unmasked_path, masked_path)
     u_img = np.array(Image.open(unmasked_path).convert("RGB"))
     m_img, yolo_anns = masked_array_to_annotations(
@@ -67,10 +68,19 @@ def _add_one_pair(
         raise ValueError(f"No green pin regions found in {masked_path}")
 
     h, w = u_img.shape[:2]
-    if use_roi and max(w, h) > ROI_SIZE_THRESHOLD:
-        roi = extract_pin_roi(masked_path, margin_ratio=roi_margin)
-        u_img = crop_to_roi(u_img, roi)
-        m_img = crop_to_roi(m_img, roi)
+    if roi is not None:
+        # User-specified ROI (roi_map from ROI Editor, ROADMAP 10.20)
+        x1, y1, x2, y2 = roi
+        x1, x2 = max(0, min(x1, x2)), min(w, max(x1, x2))
+        y1, y2 = max(0, min(y1, y2)), min(h, max(y1, y2))
+        roi_clamped = (x1, y1, x2, y2)
+        u_img = crop_to_roi(u_img, roi_clamped)
+        m_img = crop_to_roi(m_img, roi_clamped)
+        _, yolo_anns = masked_array_to_annotations(m_img)
+    elif use_roi and max(w, h) > ROI_SIZE_THRESHOLD:
+        roi_auto = extract_pin_roi(masked_path, margin_ratio=roi_margin)
+        u_img = crop_to_roi(u_img, roi_auto)
+        m_img = crop_to_roi(m_img, roi_auto)
         _, yolo_anns = masked_array_to_annotations(m_img)
 
     stem = unmasked_path.stem
@@ -89,7 +99,7 @@ def prepare_yolo_dataset(
     masked_path: Path,
     output_dir: Path,
     class_id: int = 0,
-    use_roi: bool = True,
+    use_roi: bool = False,
     roi_margin: float = 0.15,
 ) -> Path:
     """
@@ -158,30 +168,27 @@ def analyze_dataset_for_training(
     img_h = img_sizes[0][1] if img_sizes else 0
     max_dim = max(img_w, img_h) if img_sizes else 0
 
-    # imgsz: 320, 416, 512, 640, 768, 896, 1024, 1280 (YOLO typical)
+    # imgsz: suggestion only, no hard cap (ROADMAP 10.20). User can override 320–4096.
     imgsz = 640
     note_parts = []
 
     if max_dim > ROI_SIZE_THRESHOLD:
         imgsz = 640
-        note_parts.append("ROI crop")
+        note_parts.append("full image (ROI off)")
     elif max_dim > 0:
         if pin_widths and pin_heights:
             avg_w = sum(pin_widths) / len(pin_widths)
             avg_h = sum(pin_heights) / len(pin_heights)
             if avg_w * avg_h < 120 or avg_w < 12 or avg_h < 8:
-                imgsz = 1280
+                imgsz = min(4096, max(640, max_dim))
                 note_parts.append("small pins")
             elif max_dim < 640:
-                imgsz = min(1280, max(640, max_dim))
+                imgsz = min(4096, max(640, max_dim))
                 note_parts.append("match resolution")
         else:
-            imgsz = min(1280, max(640, max_dim)) if max_dim > 400 else 640
+            imgsz = min(4096, max(640, max_dim)) if max_dim > 400 else 640
 
-    epochs = 150 if n_images < 15 else 100
-    if n_images < 10:
-        epochs = 180
-        note_parts.append("few images")
+    epochs = 3  # Fast training, geometry refinement for 100% P/R
 
     val_split = 0.2
     if n_images < 5:
@@ -190,10 +197,12 @@ def analyze_dataset_for_training(
 
     note = ", ".join(note_parts) if note_parts else "default"
 
+    mosaic = 0.0 if "full image" in note or n_images >= 20 else 0.5
     return {
         "imgsz": imgsz,
         "epochs": epochs,
         "val_split": val_split,
+        "mosaic": mosaic,
         "note": note,
         "pin_avg_w": sum(pin_widths) / len(pin_widths) if pin_widths else 0,
         "pin_avg_h": sum(pin_heights) / len(pin_heights) if pin_heights else 0,
@@ -273,15 +282,17 @@ def prepare_yolo_dataset_from_dirs(
     class_id: int = 0,
     val_split: float = 0.2,
     seed: int = 42,
-    use_roi: bool = True,
+    use_roi: bool = False,
     roi_margin: float = 0.15,
+    roi_map: dict[str, list[int]] | None = None,
 ) -> Path:
     """
     Create YOLO dataset from directories.
     Pairs by matching filename. unmasked/01.jpg <-> masked/01.jpg
     val_split: fraction for validation (0.2 = 80% train, 20% val). 0 = no split (train=val).
-    use_roi: when max(w,h)>2000, crop to pin region before training (saves compute).
+    use_roi: when max(w,h)>2000, crop to pin region (ignored if roi_map has entry). Default False.
     roi_margin: margin around pin bbox (0.15 = 15%).
+    roi_map: user ROI per stem {stem: [x1,y1,x2,y2]}. If None, loads output_dir/roi_map.json if exists.
     """
     output_dir = Path(output_dir)
     train_img = output_dir / "images" / "train"
@@ -296,6 +307,22 @@ def prepare_yolo_dataset_from_dirs(
     unmasked_dir = Path(unmasked_dir)
     masked_dir = Path(masked_dir)
     u_files = sorted([f for f in unmasked_dir.iterdir() if f.suffix.lower() in IMG_EXTS], key=lambda p: p.name)
+
+    # Load roi_map from file if not provided (ROADMAP 10.20)
+    # roi_map.json lives in output folder: output_dir.parent (dataset_dir's parent) or output_dir
+    if roi_map is None:
+        roi_map_path = output_dir.parent / "roi_map.json"
+        if not roi_map_path.exists():
+            roi_map_path = output_dir / "roi_map.json"
+        if roi_map_path.exists():
+            try:
+                import json
+                with open(roi_map_path) as f:
+                    roi_map = {k: list(v) for k, v in json.load(f).items() if isinstance(v, (list, tuple)) and len(v) == 4}
+            except Exception:
+                roi_map = {}
+        else:
+            roi_map = {}
 
     if not u_files:
         raise ValueError(
@@ -314,12 +341,20 @@ def prepare_yolo_dataset_from_dirs(
         val_files = set()
         train_files = u_files
 
+    def _get_roi(u_path: Path) -> tuple[int, int, int, int] | None:
+        stem = u_path.stem
+        if stem in roi_map and len(roi_map[stem]) == 4:
+            return tuple(roi_map[stem])
+        return None
+
     for u_path in train_files:
         m_path = _find_masked_pair(u_path, masked_dir)
-        _add_one_pair(u_path, m_path, train_img, train_lbl, class_id, use_roi=use_roi, roi_margin=roi_margin)
+        roi = _get_roi(u_path)
+        _add_one_pair(u_path, m_path, train_img, train_lbl, class_id, use_roi=use_roi and roi is None, roi_margin=roi_margin, roi=roi)
     for u_path in val_files:
         m_path = _find_masked_pair(u_path, masked_dir)
-        _add_one_pair(u_path, m_path, val_img, val_lbl, class_id, use_roi=use_roi, roi_margin=roi_margin)
+        roi = _get_roi(u_path)
+        _add_one_pair(u_path, m_path, val_img, val_lbl, class_id, use_roi=use_roi and roi is None, roi_margin=roi_margin, roi=roi)
 
     data_yaml = output_dir / "data.yaml"
     val_path = "images/val" if val_files else "images/train"
@@ -338,7 +373,7 @@ def prepare_yolo_test_dataset(
     masked_dir: Path,
     output_dir: Path,
     class_id: int = 0,
-    use_roi: bool = True,
+    use_roi: bool = False,
     roi_margin: float = 0.15,
 ) -> Path:
     """

@@ -44,7 +44,7 @@ def _estimate_training_time(n_images: int, imgsz: int, epochs: int, workers: int
     """
     if n_images <= 0:
         return 0.0
-    imgsz = min(imgsz, 1280)  # cap for estimate
+    imgsz = min(imgsz, 4096)  # sane max for estimate (ROADMAP 10.20: no hard cap)
     base_per_epoch = n_images * 6.0 * (imgsz / 640) ** 2
     worker_factor = 1.0 + 0.05 * min(workers, 4)
     return base_per_epoch * epochs / worker_factor
@@ -148,7 +148,6 @@ class PinDetectionGUI:
         self.output_dir = tk.StringVar(value="pin_models")
         self.epochs_var = tk.IntVar(value=3)
         self.imgsz_var = tk.IntVar(value=640)
-        self._imgsz_max = 1280
         self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 4))  # cap 4 for Windows stability
         self._train_stop = threading.Event()
 
@@ -186,15 +185,15 @@ class PinDetectionGUI:
         row += 1
 
         ttk.Label(train_f, text="Epochs:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        sb_epochs = ttk.Spinbox(train_f, from_=10, to=500, textvariable=self.epochs_var, width=8, command=self._update_eta)
+        sb_epochs = ttk.Spinbox(train_f, from_=3, to=500, textvariable=self.epochs_var, width=8, command=self._update_eta)
         sb_epochs.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
         row += 1
 
-        # imgsz: ROI off (10.18) → fixed 640, no user input to avoid lag. Hidden per EXE_ARTIFACT_ISSUES.
-        self._imgsz_frame = ttk.Frame(train_f)
-        self._imgsz_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=2)
-        ttk.Label(self._imgsz_frame, text="Image size:").grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(self._imgsz_frame, text="640 (fixed, ROI off)", foreground="gray").grid(row=0, column=1, sticky=tk.W, padx=4)
+        # imgsz: user-specified, no cap (ROADMAP 10.20)
+        ttk.Label(train_f, text="Image size (imgsz):").grid(row=row, column=0, sticky=tk.W, pady=2)
+        sb_imgsz = ttk.Spinbox(train_f, from_=320, to=4096, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
+        sb_imgsz.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
+        ttk.Label(train_f, text="(YOLO input size, no cap)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
 
         ttk.Label(train_f, text="Workers:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -275,12 +274,13 @@ class PinDetectionGUI:
         self.train_btn.pack(side=tk.LEFT, padx=4)
         self.stop_btn = ttk.Button(btn_f, text="Stop training", command=self._on_stop_train, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_f, text="Edit ROI", command=self._on_edit_roi).pack(side=tk.LEFT, padx=4)
 
         train_f.columnconfigure(1, weight=1)
 
-        # Bind spinbox for ETA update (imgsz removed — fixed 640, ROI off)
-        for c in [sb_epochs, sb_workers]:
-            c.bind("<KeyRelease>", lambda e: self._update_eta())
+        # Bind spinbox for ETA update (lightweight — no scan restart)
+        for c in [sb_epochs, sb_imgsz, sb_workers]:
+            c.bind("<KeyRelease>", lambda e: self._update_eta_label())
 
         # Inference tab
         inf_f = ttk.Frame(nb, padding=8)
@@ -345,6 +345,32 @@ class PinDetectionGUI:
             self.masked_dir.set(p)
             self._update_eta()
 
+    def _update_eta_label(self):
+        """Update ETA label only (no scan). Called on imgsz/epochs/workers spinbox change."""
+        u = self.unmasked_dir.get().strip()
+        m = self.masked_dir.get().strip()
+        if not u or not m:
+            return
+        try:
+            from .dataset import IMG_EXTS
+            from .train import _default_workers
+            pu, pm = Path(u), Path(m)
+            u_files = [f for f in pu.iterdir() if f.suffix.lower() in IMG_EXTS]
+            n = len(u_files)
+            try:
+                workers = int(self.workers_var.get())
+            except Exception:
+                workers = _default_workers()
+            try:
+                imgsz = int(self.imgsz_var.get())
+            except Exception:
+                imgsz = 640
+            imgsz = max(320, min(imgsz, 4096))
+            sec = _estimate_training_time(n, imgsz, self.epochs_var.get(), workers)
+            self.eta_label.config(text=_format_duration(sec))
+        except Exception:
+            pass
+
     def _update_eta(self):
         """Quick update: n_images, w×h, ETA. No heavy analyze (runs in background)."""
         u = self.unmasked_dir.get().strip()
@@ -379,7 +405,11 @@ class PinDetectionGUI:
                 workers = int(self.workers_var.get())
             except Exception:
                 workers = _default_workers()
-            imgsz = 640  # fixed, ROI off (10.18)
+            try:
+                imgsz = int(self.imgsz_var.get())
+            except Exception:
+                imgsz = 640
+            imgsz = max(320, min(imgsz, 4096))  # sane range, no hard cap
             sec = _estimate_training_time(n, imgsz, self.epochs_var.get(), workers)
             self.eta_label.config(text=_format_duration(sec))
 
@@ -423,18 +453,43 @@ class PinDetectionGUI:
         epochs = suggested.get("epochs", 3)
         mosaic = suggested.get("mosaic", 0.0)
         note = suggested.get("note", "")
-        self.suggested_label.config(text=f"imgsz:640, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
+        imgsz_sug = suggested.get("imgsz", 640)
+        self.suggested_label.config(text=f"imgsz:{imgsz_sug}, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
         self.apply_suggested_btn.config(state=tk.NORMAL)
 
     def _on_apply_suggested(self):
         if not getattr(self, "_suggested", None):
             return
         s = self._suggested
-        self.imgsz_var.set(640)  # fixed, ROI off
+        self.imgsz_var.set(min(s.get("imgsz", 640), 4096))
         self.epochs_var.set(s.get("epochs", 3))
         self.val_split_var.set(s.get("val_split", 0.2))
         self.mosaic_var.set(s.get("mosaic", 0.0))
         self._update_eta()
+
+    def _on_edit_roi(self):
+        """Open ROI Editor to manually draw ROI per image (ROADMAP 10.20)."""
+        u = self.unmasked_dir.get().strip()
+        m = self.masked_dir.get().strip()
+        out = self.output_dir.get().strip()
+        if not u or not m:
+            messagebox.showerror("Error", "Select unmasked and masked folders first.")
+            return
+        if not out:
+            messagebox.showerror("Error", "Select output folder first.")
+            return
+        try:
+            from .dataset import IMG_EXTS
+            pu, pm = Path(u), Path(m)
+            u_files = [f for f in pu.iterdir() if f.suffix.lower() in IMG_EXTS]
+            if not u_files:
+                messagebox.showerror("Error", f"No images in {u}")
+                return
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        from .roi_editor import run_roi_editor
+        run_roi_editor(u, m, Path(out), parent=self.root)
 
     def _on_train(self):
         u = self.unmasked_dir.get().strip()
@@ -466,22 +521,19 @@ class PinDetectionGUI:
                     val_split = 0.2
                 data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split, use_roi=False)
 
-                # Start graph poll in main thread
-                save_dir = Path(out_dir) / "pin_run"
+                # Start graph poll: YOLO saves to runs/detect/<project>/pin_run
+                save_dir = Path("runs") / "detect" / Path(out_dir).name / "pin_run"
                 self._start_graph_poll(save_dir)
 
                 try:
                     workers = int(self.workers_var.get())
                 except Exception:
                     workers = None
-                imgsz = self.imgsz_var.get()
-                if imgsz > getattr(self, "_imgsz_max", 1280):
-                    imgsz = 1280
-                    self.imgsz_var.set(1280)
-                    self.root.after(0, lambda: messagebox.showwarning(
-                        "Image size capped",
-                        "imgsz capped at 1280 for stable training. Larger values can cause very long runs."
-                    ))
+                try:
+                    imgsz = int(self.imgsz_var.get())
+                except Exception:
+                    imgsz = 640
+                imgsz = max(320, min(imgsz, 4096))  # sane range, no hard cap (ROADMAP 10.20)
                 try:
                     mosaic_val = float(self.mosaic_var.get())
                     mosaic_val = max(0.0, min(1.0, mosaic_val))
