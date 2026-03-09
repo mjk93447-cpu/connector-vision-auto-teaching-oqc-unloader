@@ -1,10 +1,11 @@
 """
-Train YOLO26 model from masked/unmasked image pairs + Excel.
+Train YOLO26 model from masked/unmasked image pairs.
 Supports 1 pair or 10 pairs (unmasked-dir + masked-dir).
 """
 import os
 import threading
 from pathlib import Path
+from typing import Callable
 
 from ultralytics import YOLO
 
@@ -31,6 +32,8 @@ def train_pin_model(
     cache: str | bool = True,
     mosaic: float = 0.0,
     rect: bool = True,
+    use_roi: bool = True,
+    on_progress: Callable[[int, int, Path], None] | None = None,
 ) -> Path:
     """
     Train pin detection model.
@@ -46,11 +49,12 @@ def train_pin_model(
 
     if unmasked_dir and masked_dir:
         data_yaml = prepare_yolo_dataset_from_dirs(
-            Path(unmasked_dir), Path(masked_dir), dataset_dir, val_split=val_split
+            Path(unmasked_dir), Path(masked_dir), dataset_dir,
+            val_split=val_split, use_roi=use_roi, on_progress=on_progress,
         )
     elif unmasked_path and masked_path:
         data_yaml = prepare_yolo_dataset(
-            Path(unmasked_path), Path(masked_path), dataset_dir
+            Path(unmasked_path), Path(masked_path), dataset_dir, use_roi=use_roi
         )
     else:
         raise ValueError("Use --unmasked/--masked or --unmasked-dir/--masked-dir")

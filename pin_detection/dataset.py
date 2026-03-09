@@ -8,7 +8,7 @@ import re
 import random
 import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 import numpy as np
 from PIL import Image
@@ -188,7 +188,7 @@ def analyze_dataset_for_training(
         else:
             imgsz = min(4096, max(640, max_dim)) if max_dim > 400 else 640
 
-    epochs = 3  # Fast training, geometry refinement for 100% P/R
+    epochs = 100  # Higher epochs for better P/R (EXE_TEST_FEEDBACK 10.20.2)
 
     val_split = 0.2
     if n_images < 5:
@@ -282,17 +282,19 @@ def prepare_yolo_dataset_from_dirs(
     class_id: int = 0,
     val_split: float = 0.2,
     seed: int = 42,
-    use_roi: bool = False,
+    use_roi: bool = True,
     roi_margin: float = 0.15,
     roi_map: dict[str, list[int]] | None = None,
+    on_progress: Callable[[int, int, Path], None] | None = None,
 ) -> Path:
     """
     Create YOLO dataset from directories.
     Pairs by matching filename. unmasked/01.jpg <-> masked/01.jpg
     val_split: fraction for validation (0.2 = 80% train, 20% val). 0 = no split (train=val).
-    use_roi: when max(w,h)>2000, crop to pin region (ignored if roi_map has entry). Default False.
+    use_roi: when max(w,h)>2000, crop to pin region (ignored if roi_map has entry). Default True.
     roi_margin: margin around pin bbox (0.15 = 15%).
     roi_map: user ROI per stem {stem: [x1,y1,x2,y2]}. If None, loads output_dir/roi_map.json if exists.
+    on_progress: optional callback(current, total, path) during dataset build.
     """
     output_dir = Path(output_dir)
     train_img = output_dir / "images" / "train"
@@ -347,14 +349,22 @@ def prepare_yolo_dataset_from_dirs(
             return tuple(roi_map[stem])
         return None
 
+    all_files = list(train_files) + list(val_files)
+    total = len(all_files)
+    done = [0]
+
+    def _add_with_progress(u_path, img_dir, lbl_dir):
+        if on_progress:
+            on_progress(done[0] + 1, total, u_path)
+        m_path = _find_masked_pair(u_path, masked_dir)
+        roi = _get_roi(u_path)
+        _add_one_pair(u_path, m_path, img_dir, lbl_dir, class_id, use_roi=use_roi and roi is None, roi_margin=roi_margin, roi=roi)
+        done[0] += 1
+
     for u_path in train_files:
-        m_path = _find_masked_pair(u_path, masked_dir)
-        roi = _get_roi(u_path)
-        _add_one_pair(u_path, m_path, train_img, train_lbl, class_id, use_roi=use_roi and roi is None, roi_margin=roi_margin, roi=roi)
+        _add_with_progress(u_path, train_img, train_lbl)
     for u_path in val_files:
-        m_path = _find_masked_pair(u_path, masked_dir)
-        roi = _get_roi(u_path)
-        _add_one_pair(u_path, m_path, val_img, val_lbl, class_id, use_roi=use_roi and roi is None, roi_margin=roi_margin, roi=roi)
+        _add_with_progress(u_path, val_img, val_lbl)
 
     data_yaml = output_dir / "data.yaml"
     val_path = "images/val" if val_files else "images/train"

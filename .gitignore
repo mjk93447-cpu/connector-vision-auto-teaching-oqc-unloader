@@ -41,6 +41,7 @@ models/
 pin_eval_results/
 runs/
 test_data/
+yolo_result/
 yolo26n.pt
 
 # Test / eval artifacts

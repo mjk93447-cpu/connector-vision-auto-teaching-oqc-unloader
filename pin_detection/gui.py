@@ -81,7 +81,6 @@ STEP 1: Prepare your data
 STEP 2: Select folders
   • Unmasked images folder: Browse to the folder containing original images.
   • Masked images folder: Browse to the folder containing masked images.
-  • Excel file (optional): Reference Excel for output format (multi-row: one row per cell).
 
 STEP 3: Output folder
   • Where the trained model will be saved (default: pin_models).
@@ -93,9 +92,9 @@ STEP 4: Training parameters
   • Suggested: After selecting folders, click "Apply suggested" to auto-set imgsz, epochs, val_split based on dataset scan.
 
 STEP 5: ROI Editor (optional, for large images)
-  • Click "Edit ROI" to manually draw a rectangle per image. Use Prev/Next or Left/Right keys.
-  • Drag on the image to select the pin region. Click "Save ROI map" to save roi_map.json.
-  • Training will use your ROI when roi_map.json exists in the output folder.
+  • Click "Edit ROI" to see unmasked (YOLO input) and masked (ground truth) side by side.
+  • Drag on the left (unmasked) to set ROI. Prev/Next or Left/Right keys to navigate.
+  • Save ROI map to roi_map.json. Training uses it when present in the output folder.
 
 STEP 6: Start training
   • Click "Start training". The graph shows Loss, Precision, and Recall during training.
@@ -148,10 +147,9 @@ class PinDetectionGUI:
 
         self.unmasked_dir = tk.StringVar()
         self.masked_dir = tk.StringVar()
-        self.excel_dir = tk.StringVar()
         self.model_path = tk.StringVar()
         self.output_dir = tk.StringVar(value="pin_models")
-        self.epochs_var = tk.IntVar(value=3)
+        self.epochs_var = tk.IntVar(value=100)
         self.imgsz_var = tk.IntVar(value=640)
         self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 4))  # cap 4 for Windows stability
         self._train_stop = threading.Event()
@@ -179,18 +177,13 @@ class PinDetectionGUI:
         ttk.Button(train_f, text="Browse", command=lambda: self._on_masked_browse()).grid(row=row, column=2, pady=2)
         row += 1
 
-        ttk.Label(train_f, text="Excel file (optional):").grid(row=row, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(train_f, textvariable=self.excel_dir, width=45).grid(row=row, column=1, padx=4, pady=2)
-        ttk.Button(train_f, text="Browse", command=lambda: self.excel_dir.set(_select_file(self.root, "Excel", [("Excel", "*.xlsx *.xls")]) or self.excel_dir.get())).grid(row=row, column=2, pady=2)
-        row += 1
-
         ttk.Label(train_f, text="Output folder:").grid(row=row, column=0, sticky=tk.W, pady=2)
         ttk.Entry(train_f, textvariable=self.output_dir, width=45).grid(row=row, column=1, padx=4, pady=2)
         ttk.Button(train_f, text="Browse", command=lambda: self.output_dir.set(_select_dir(self.root, "Output folder") or self.output_dir.get())).grid(row=row, column=2, pady=2)
         row += 1
 
         ttk.Label(train_f, text="Epochs:").grid(row=row, column=0, sticky=tk.W, pady=2)
-        sb_epochs = ttk.Spinbox(train_f, from_=3, to=500, textvariable=self.epochs_var, width=8, command=self._update_eta)
+        sb_epochs = ttk.Spinbox(train_f, from_=10, to=500, textvariable=self.epochs_var, width=8, command=self._update_eta)
         sb_epochs.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
         row += 1
 
@@ -198,7 +191,7 @@ class PinDetectionGUI:
         ttk.Label(train_f, text="Image size (imgsz):").grid(row=row, column=0, sticky=tk.W, pady=2)
         sb_imgsz = ttk.Spinbox(train_f, from_=320, to=4096, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
         sb_imgsz.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
-        ttk.Label(train_f, text="(YOLO input size, no cap)").grid(row=row, column=2, sticky=tk.W, pady=2)
+        ttk.Label(train_f, text="(320–4096)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
 
         ttk.Label(train_f, text="Workers:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -535,17 +528,17 @@ class PinDetectionGUI:
                 self.root.after(0, lambda: self.status_var.set("Training..."))
 
                 from .train import train_pin_model
-                from .dataset import get_dataset_info, prepare_yolo_dataset_from_dirs
 
                 out_dir = self.output_dir.get()
-                dataset_dir = Path(out_dir) / "dataset"
-                dataset_dir.mkdir(parents=True, exist_ok=True)
                 try:
                     val_split = float(self.val_split_var.get())
                     val_split = max(0.01, min(0.5, val_split))
                 except Exception:
                     val_split = 0.2
-                data_yaml = prepare_yolo_dataset_from_dirs(Path(u), Path(m), dataset_dir, val_split=val_split, use_roi=False)
+
+                def _on_dataset_progress(current: int, total: int, path):
+                    c, t, p = current, total, path
+                    self.root.after(0, lambda c=c, t=t, p=p: self._update_train_log(f"Building dataset ({c}/{t}) — {p.name}", clear=False))
 
                 # Start graph poll: YOLO saves to output_dir/pin_run (abs path) or runs/detect/<name>/pin_run (rel)
                 candidates = [
@@ -578,6 +571,8 @@ class PinDetectionGUI:
                     val_split=val_split,
                     stop_event=self._train_stop,
                     mosaic=mosaic_val,
+                    use_roi=True,
+                    on_progress=_on_dataset_progress,
                 )
 
                 self.root.after(0, lambda: self._stop_graph_poll())
