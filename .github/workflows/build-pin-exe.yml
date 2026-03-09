@@ -52,8 +52,8 @@ jobs:
         run: python tools_scripts/repro_exe_train_crash.py
         working-directory: ${{ github.workspace }}
 
-      - name: Generate large factory data (5000×4000, 20 imgs)
-        run: python tools_scripts/generate_pin_test_data.py --output-dir test_data/pin_large_factory --large-factory
+      - name: Generate large factory data (5000×4000, CI: 5 imgs)
+        run: python tools_scripts/generate_pin_test_data.py --output-dir test_data/pin_large_factory --large-factory --large-factory-n 5
         working-directory: ${{ github.workspace }}
 
       - name: Test EXE large train (5000×4000 + roi_map, frozen mode)

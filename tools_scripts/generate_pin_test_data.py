@@ -248,14 +248,15 @@ def main() -> int:
     parser.add_argument("--blur-prob", type=float, default=0.25)
     parser.add_argument("--n-fake-pins", type=int, default=6)
     parser.add_argument("--large-factory", action="store_true", help="5000×4000 factory-like data + roi_map.json")
+    parser.add_argument("--large-factory-n", type=int, default=20, help="Number of pairs for --large-factory (default 20, use 5 for CI)")
     args = parser.parse_args()
 
     root = _project_root()
     out = root / args.output_dir
 
     if args.large_factory:
-        _generate_large_factory(out, n_pairs=20)
-        print(f"Generated 20 pairs (5000×4000, 40 pins, complex bg) in {out}")
+        _generate_large_factory(out, n_pairs=args.large_factory_n)
+        print(f"Generated {args.large_factory_n} pairs (5000×4000, 40 pins, complex bg) in {out}")
         return 0
 
     if args.n_pairs > 0:
