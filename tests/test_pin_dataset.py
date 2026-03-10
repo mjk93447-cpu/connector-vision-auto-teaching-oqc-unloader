@@ -35,6 +35,15 @@ class TestAnnotation(unittest.TestCase):
         self.assertLessEqual(y1, 5)
         self.assertGreaterEqual(y2, 8)
 
+    def test_extract_red_mask(self):
+        """Action #33: red target marker extraction."""
+        from pin_detection.annotation import extract_red_mask
+        img = np.zeros((10, 10, 3), dtype=np.uint8)
+        img[2:4, 2:4] = [255, 0, 0]
+        mask = extract_red_mask(img)
+        self.assertEqual(mask[2, 2], 255)
+        self.assertEqual(mask[0, 0], 0)
+
     def test_masked_to_annotations_synthetic(self):
         """Create synthetic masked image with green dots, verify annotations."""
         from pin_detection.annotation import masked_image_to_annotations
@@ -55,6 +64,16 @@ class TestAnnotation(unittest.TestCase):
                 self.assertLessEqual(yc, 1)
                 self.assertGreater(w, 0)
                 self.assertGreater(h, 0)
+
+    def test_masked_to_annotations_red_priority(self):
+        """Action #33: red markers take priority; red-only image yields red annotations."""
+        from pin_detection.annotation import masked_array_to_annotations
+        img = np.zeros((100, 100, 3), dtype=np.uint8)
+        img[:, :] = [50, 50, 50]
+        img[10:15, 10:15] = [255, 0, 0]  # red
+        img[50:55, 50:55] = [255, 0, 0]  # red
+        _, anns = masked_array_to_annotations(img)
+        self.assertGreaterEqual(len(anns), 2, "Should find red regions")
 
 
 class TestDatasetPairing(unittest.TestCase):

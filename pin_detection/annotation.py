@@ -1,7 +1,7 @@
 """
-Extract pin bounding boxes from masked image (green dots or cross-shaped markers).
+Extract pin bounding boxes from masked image.
 Output: YOLO format annotations.
-Supports: filled dots, thin cross (+) markers (factory GUI rectangle tool).
+Supports: red (Action #33, ROI Editor target), green (legacy), cross-shaped (+) markers.
 """
 import numpy as np
 from PIL import Image
@@ -12,6 +12,18 @@ from typing import List, Tuple
 GREEN_G_MIN = 120
 GREEN_R_MAX_DIFF = 50   # r < g - this
 GREEN_B_MAX_DIFF = 50   # b < g - this
+
+# Red target marker (ROI Editor square/brush, avoids YOLO confusion with original green)
+RED_R_MIN = 200
+RED_G_MAX_DIFF = 60   # g < r - this
+RED_B_MAX_DIFF = 60   # b < r - this
+
+
+def extract_red_mask(img: np.ndarray) -> np.ndarray:
+    """Extract binary mask of red pixels (R high, G and B low). Action #33 target marker."""
+    r, g, b = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+    mask = ((r > RED_R_MIN) & (g < r - RED_G_MAX_DIFF) & (b < r - RED_B_MAX_DIFF)).astype(np.uint8) * 255
+    return mask
 
 
 def extract_green_mask(img: np.ndarray, relaxed: bool = True) -> np.ndarray:
@@ -82,9 +94,15 @@ def masked_image_to_annotations(masked_path: str | Path) -> Tuple[np.ndarray, Li
 
 
 def masked_array_to_annotations(img: np.ndarray) -> Tuple[np.ndarray, List[Tuple[float, float, float, float]]]:
-    """Extract YOLO annotations from masked image array (green regions)."""
+    """
+    Extract YOLO annotations from masked image array.
+    RED (target marker) takes priority over GREEN (legacy) for YOLO training. Action #33.
+    """
     h, w = img.shape[:2]
-    mask = extract_green_mask(img)
+    mask_red = extract_red_mask(img)
+    mask_green = extract_green_mask(img)
+    # Prefer red (ROI Editor target); fallback to green (legacy)
+    mask = mask_red if mask_red.any() else mask_green
     bboxes = cluster_to_bbox(mask)
     yolo_anns = bboxes_to_yolo_format(bboxes, w, h)
     return img, yolo_anns

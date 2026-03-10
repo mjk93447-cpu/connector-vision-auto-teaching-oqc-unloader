@@ -21,7 +21,10 @@ except ImportError:
 ZOOM_MIN, ZOOM_MAX = 0.25, 4.0
 ZOOM_STEP = 1.15
 BRUSH_RADIUS = 4
-GREEN_RGB = (0, 255, 0)
+SQUARE_SIZE = 12  # Small square per-pin marker (Action #33)
+ERASE_RADIUS = 10
+# Red for target masking (avoids confusion with original green markers, YOLO learns from this)
+TARGET_MARKER_RGB = (255, 0, 0)
 
 
 def load_roi_map(path: Path) -> dict:
@@ -97,7 +100,7 @@ def run_roi_editor(
     roi_map = load_roi_map(roi_map_path)
 
     root = tk.Toplevel(parent) if parent else tk.Toplevel()
-    root.title("ROI Editor — Zoom: scroll | Rectangle: drag left | Brush: paint right | Split: Upper/Lower")
+    root.title("ROI Editor — Square: click right to add pin | Erase: click right to remove | Brush: paint | Scroll: zoom")
     root.geometry("1280x750")
     root.minsize(900, 550)
 
@@ -121,7 +124,7 @@ def run_roi_editor(
         return f, c, inner
 
     left_f, canvas_u, _ = _make_canvas_frame("Unmasked (YOLO input — drag ROI)")
-    right_f, canvas_m, _ = _make_canvas_frame("Masked (ground truth — brush to mark pins)")
+    right_f, canvas_m, _ = _make_canvas_frame("Masked (red = target pins for YOLO — Square/Brush add, Erase remove)")
 
     # State
     idx = [0]
@@ -141,6 +144,7 @@ def run_roi_editor(
     current_roi_lower = [None]
     brush_active = [False]
     last_brush_xy = [None]
+    square_squares = []  # List of (x1,y1,x2,y2) for current image's square markers (for redraw)
 
     def _find_masked(u_path: Path) -> Path | None:
         try:
@@ -233,6 +237,7 @@ def run_roi_editor(
         img_size[0], img_size[1] = img_u.size
         img_u_pil[0] = img_u
         img_m_pil[0] = img_m
+        square_squares.clear()
 
         cw = 550
         ch = max(canvas_u.winfo_height() or 400, 300)
@@ -280,7 +285,7 @@ def run_roi_editor(
             current_roi_lower[0] = None
 
         pair_info = f" + {m_path.name}" if m_path else " (no masked pair)"
-        mode_txt = "Brush" if mode[0] == "brush" else ("Split ROI" if split_mode[0] else "Rectangle")
+        mode_txt = mode[0].capitalize() if mode[0] in ("brush", "square", "erase") else ("Split ROI" if split_mode[0] else "Rectangle")
         nav_label.config(
             text=f"Image {idx[0] + 1}/{len(u_files)} — {u_path.name}{pair_info}  |  Mode: {mode_txt}"
         )
@@ -298,6 +303,18 @@ def run_roi_editor(
             brush_active[0] = True
             last_brush_xy[0] = (ix, iy)
             _apply_brush(ix, iy)
+            return
+
+        if mode[0] == "square" and not is_left:
+            _apply_square(ix, iy)
+            _redraw_masked_canvas()
+            _save_masked_image()
+            return
+
+        if mode[0] == "erase" and not is_left:
+            _apply_erase(ix, iy)
+            _redraw_masked_canvas()
+            _save_masked_image()
             return
 
         if mode[0] == "rect" and is_left:
@@ -325,7 +342,62 @@ def run_roi_editor(
             return
         draw = ImageDraw.Draw(img_m_pil[0])
         rad = BRUSH_RADIUS
-        draw.ellipse((ix - rad, iy - rad, ix + rad, iy + rad), fill=GREEN_RGB, outline=GREEN_RGB)
+        draw.ellipse((ix - rad, iy - rad, ix + rad, iy + rad), fill=TARGET_MARKER_RGB, outline=TARGET_MARKER_RGB)
+
+    def _apply_square(ix: int, iy: int):
+        """Add one small red square at click (Action #33)."""
+        if img_m_pil[0] is None:
+            return
+        half = SQUARE_SIZE // 2
+        x1 = max(0, ix - half)
+        y1 = max(0, iy - half)
+        x2 = min(img_size[0], ix + half)
+        y2 = min(img_size[1], iy + half)
+        if x2 <= x1 or y2 <= y1:
+            return
+        draw = ImageDraw.Draw(img_m_pil[0])
+        draw.rectangle((x1, y1, x2, y2), fill=TARGET_MARKER_RGB, outline=TARGET_MARKER_RGB)
+        square_squares.append([x1, y1, x2, y2])
+
+    def _apply_erase(ix: int, iy: int):
+        """Remove marker at click by restoring unmasked pixels (Action #33)."""
+        if img_m_pil[0] is None or img_u_pil[0] is None:
+            return
+        rad = ERASE_RADIUS
+        x1 = max(0, ix - rad)
+        y1 = max(0, iy - rad)
+        x2 = min(img_size[0], ix + rad + 1)
+        y2 = min(img_size[1], iy + rad + 1)
+        region_u = img_u_pil[0].crop((x1, y1, x2, y2))
+        img_m_pil[0].paste(region_u, (x1, y1))
+        # Remove squares that overlap this region
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        square_squares[:] = [
+            b for b in square_squares
+            if not (abs((b[0] + b[2]) // 2 - cx) < rad + SQUARE_SIZE and abs((b[1] + b[3]) // 2 - cy) < rad + SQUARE_SIZE)
+        ]
+        new_w = int(img_size[0] * scale[0])
+        new_h = int(img_size[1] * scale[0])
+        img_m_resized = img_m_pil[0].resize((new_w, new_h), Image.Resampling.LANCZOS)
+        photo_m[0] = ImageTk.PhotoImage(img_m_resized)
+        canvas_m.delete("all")
+        canvas_m.create_image(0, 0, anchor=tk.NW, image=photo_m[0])
+        s = scale[0]
+        if split_mode[0]:
+            if current_roi_upper[0]:
+                box = current_roi_upper[0]
+                canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="cyan", width=2)
+            if current_roi_lower[0]:
+                box = current_roi_lower[0]
+                canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="orange", width=2)
+        elif current_roi[0]:
+            box = current_roi[0]
+            canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="lime", width=2)
+
+    def _redraw_masked_canvas():
+        """Redraw masked canvas after square/erase (no PIL change for brush - it does inline)."""
+        if img_m_pil[0] is None:
+            return
         new_w = int(img_size[0] * scale[0])
         new_h = int(img_size[1] * scale[0])
         img_m_resized = img_m_pil[0].resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -471,7 +543,9 @@ def run_roi_editor(
     nav_label.pack(side=tk.LEFT, padx=12)
     tk.Label(nav_f, text="(Left/Right keys | Scroll: zoom)", font=("Segoe UI", 8), fg="gray").pack(side=tk.LEFT, padx=4)
     ttk.Button(nav_f, text="Rectangle", command=lambda: _set_mode("rect")).pack(side=tk.LEFT, padx=2)
+    ttk.Button(nav_f, text="Square", command=lambda: _set_mode("square")).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Brush", command=lambda: _set_mode("brush")).pack(side=tk.LEFT, padx=2)
+    ttk.Button(nav_f, text="Erase", command=lambda: _set_mode("erase")).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Split ROI", command=_toggle_split).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Clear ROI", command=_clear_current).pack(side=tk.RIGHT, padx=4)
     ttk.Button(nav_f, text="Save ROI map", command=_save).pack(side=tk.RIGHT, padx=4)

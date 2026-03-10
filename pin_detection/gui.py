@@ -4,6 +4,7 @@ All UI in English for global use.
 """
 import os
 import platform
+import sys
 import threading
 import time
 import tkinter as tk
@@ -480,10 +481,10 @@ class PinDetectionGUI:
         m = self.masked_dir.get().strip()
         out = self.output_dir.get().strip()
         if not u or not m:
-            messagebox.showerror("Error", "Select unmasked and masked folders first.")
+            messagebox.showerror("Error", "Select unmasked folder and masked folder first.")
             return
         if not out:
-            messagebox.showerror("Error", "Select output folder first.")
+            messagebox.showerror("Error", "Select output folder first (e.g. pin_models).")
             return
         try:
             from .dataset import IMG_EXTS
@@ -509,10 +510,10 @@ class PinDetectionGUI:
         m = self.masked_dir.get().strip()
         out = self.output_dir.get().strip()
         if not u or not m:
-            messagebox.showerror("Error", "Select unmasked and masked folders.")
+            messagebox.showerror("Error", "Select unmasked folder and masked folder first.")
             return
         if not out:
-            messagebox.showerror("Error", "Select output folder first.")
+            messagebox.showerror("Error", "Select output folder first (e.g. pin_models).")
             return
         try:
             pu, pm, po = Path(u), Path(m), Path(out)
@@ -608,21 +609,26 @@ class PinDetectionGUI:
         """Poll results.csv and update graph + log. save_dir can be Path or list of candidate Paths."""
         self._graph_data = []
         self._graph_start_time = time.time()
-        try:
-            import matplotlib
-            matplotlib.use("TkAgg")
-            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-            from matplotlib.figure import Figure
-            fig = Figure(figsize=(5, 2.5), dpi=80)
-            self._graph_ax = fig.add_subplot(111)
-            self._graph_fig = fig
-            for w in self.graph_frame.winfo_children():
-                w.destroy()
-            self._graph_canvas = FigureCanvasTkAgg(fig, master=self.graph_frame)
-            self._graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        except Exception:
+        # EXE: skip matplotlib graph to avoid crash at epoch log timing (Action #33, #25)
+        if getattr(sys, "frozen", False):
             self._graph_canvas = None
             self._graph_ax = None
+        else:
+            try:
+                import matplotlib
+                matplotlib.use("TkAgg")
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                from matplotlib.figure import Figure
+                fig = Figure(figsize=(5, 2.5), dpi=80)
+                self._graph_ax = fig.add_subplot(111)
+                self._graph_fig = fig
+                for w in self.graph_frame.winfo_children():
+                    w.destroy()
+                self._graph_canvas = FigureCanvasTkAgg(fig, master=self.graph_frame)
+                self._graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            except Exception:
+                self._graph_canvas = None
+                self._graph_ax = None
         self._graph_save_dir = save_dir if isinstance(save_dir, list) else [save_dir]
         self._graph_poll_id = None
         self._last_logged_epoch = -1
