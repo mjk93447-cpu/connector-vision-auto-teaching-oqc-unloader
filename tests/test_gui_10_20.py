@@ -84,6 +84,20 @@ def test_dataset_roi_map_from_file():
         assert data_yaml.exists()
 
 
+def test_load_test_data_paths():
+    """Load test data resolves synthetic paths from project root (avoids Select folder first)."""
+    from pathlib import Path
+    from pin_detection.gui import _resolve_synthetic_paths
+
+    paths = _resolve_synthetic_paths()
+    if not (Path(__file__).parent.parent / "test_data").exists():
+        pytest.skip("test_data not present")
+    assert paths is not None
+    u, m, out = paths
+    assert Path(u).exists(), f"Unmasked {u}"
+    assert Path(m).exists(), f"Masked {m}"
+
+
 def test_imgsz_no_cap():
     """Verify imgsz is not capped at 1280."""
     from pin_detection.gui import _estimate_training_time

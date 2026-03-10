@@ -24,7 +24,10 @@
 | `test_data/pin_synthetic/train/unmasked`, `.../masked` | 기본 학습용 (640×480) | `python tools_scripts/generate_pin_test_data.py` |
 | `test_data/pin_large_factory/unmasked`, `.../masked` | 대용량·고화질 (5000×4000) | `python tools_scripts/generate_pin_test_data.py --output-dir test_data/pin_large_factory --large-factory --large-factory-n 10` |
 
-**검증 시**: 위 경로에 데이터가 없으면 생성 후 테스트.
+**EXE 테스트 시 "Select folder first" 방지**:
+1. EXE를 **프로젝트 루트**에서 실행 (test_data와 같은 디렉터리). 또는 `run_exe_test.bat` 사용
+2. Train 탭 **"Load test data"** 클릭 → unmasked/masked/output 자동 채움
+3. 없으면: `python tools_scripts/generate_pin_test_data.py --output-dir test_data/pin_large_factory --large-factory --large-factory-n 10` 실행 후 1–2 반복
 
 ---
 
@@ -80,7 +83,10 @@
 | EXE graph poll matplotlib | ✓ | EXE에서 graph 비활성화 (frozen 시 skip) |
 | Edit ROI 스퀘어·빨간 마스킹 | ✓ | Square, Brush, Erase 모드, TARGET_MARKER_RGB |
 | Edit ROI 지우기 | ✓ | Erase 모드, unmasked 복원 |
-| Select folder 에러 | ✓ | 메시지 명확화 |
+| Select folder 에러 | ✓ | **GUI 시작 시 test_data 자동 채움** (에이전트 테스트 시 폴더 미지정 방지) |
 | annotation RED 우선 | ✓ | extract_red_mask, masked_array_to_annotations |
 | generate_pin_test_data --red-markers | ✓ | bbox_to_red_region |
-| 합성 데이터 학습·추론 | | EXE 빌드 후 검증 |
+| pytest (45개) | ✓ | 통과 |
+| repro_exe_train_crash | ✓ | frozen, workers=0, cache=disk |
+| test_exe_large_train | ✓ | pin_large_factory, roi_map |
+| test_gui_auto_fill | ✓ | 시작 시 경로 자동 채움 검증 |

@@ -59,6 +59,10 @@ jobs:
         run: python tools_scripts/verify_roi_path.py
         working-directory: ${{ github.workspace }}
 
+      - name: "Test GUI auto-fill (avoids Select folder first)"
+        run: python tools_scripts/test_gui_auto_fill.py
+        working-directory: ${{ github.workspace }}
+
       - name: "Test EXE large train (5000x4000 roi_map frozen)"
         run: python tools_scripts/test_exe_large_train.py
         working-directory: ${{ github.workspace }}

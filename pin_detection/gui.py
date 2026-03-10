@@ -21,6 +21,32 @@ def _select_dir(parent, title: str) -> str:
     return path or ""
 
 
+# Synthetic test data (ROADMAP 10.25). Paths relative to project root.
+# Large: test_data/pin_large_factory (5000×4000). Train: test_data/pin_synthetic/train (640×480).
+
+
+def _resolve_synthetic_paths() -> tuple[str, str, str] | None:
+    """
+    Find test_data and return (unmasked, masked, output). Prefer pin_large_factory.
+    Tries cwd, cwd.parent, exe dir (EXE often runs from dist/).
+    """
+    candidates = [Path.cwd(), Path.cwd().parent]
+    if getattr(sys, "frozen", False):
+        candidates.extend([Path(sys.executable).resolve().parent, Path(sys.executable).resolve().parent.parent])
+    for root in candidates:
+        # pin_large_factory: root/test_data/pin_large_factory/unmasked, .../masked
+        pu = root / "test_data" / "pin_large_factory" / "unmasked"
+        pm = root / "test_data" / "pin_large_factory" / "masked"
+        if pu.exists() and pm.exists():
+            return (str(pu), str(pm), str(root / "pin_models_exe_test"))
+        # pin_synthetic/train
+        pu = root / "test_data" / "pin_synthetic" / "train" / "unmasked"
+        pm = root / "test_data" / "pin_synthetic" / "train" / "masked"
+        if pu.exists() and pm.exists():
+            return (str(pu), str(pm), str(root / "pin_models_exe_test"))
+    return None
+
+
 def _select_file(parent, title: str, types=None) -> str:
     types = types or [("All", "*.*"), ("Images", "*.jpg *.jpeg *.png *.bmp")]
     path = filedialog.askopenfilename(parent=parent, title=title, filetypes=types)
@@ -158,6 +184,15 @@ class PinDetectionGUI:
 
         self._build_ui()
 
+        # Auto-fill test data on startup to avoid "Select folder first" during EXE testing
+        paths = _resolve_synthetic_paths()
+        if paths:
+            u, m, out = paths
+            self.unmasked_dir.set(u)
+            self.masked_dir.set(m)
+            self.output_dir.set(out)
+            self.root.after(200, self._update_eta)
+
     def _build_ui(self):
         nb = ttk.Notebook(self.root)
         nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -182,6 +217,12 @@ class PinDetectionGUI:
         ttk.Label(train_f, text="Output folder:").grid(row=row, column=0, sticky=tk.W, pady=2)
         ttk.Entry(train_f, textvariable=self.output_dir, width=45).grid(row=row, column=1, padx=4, pady=2)
         ttk.Button(train_f, text="Browse", command=lambda: self.output_dir.set(_select_dir(self.root, "Output folder") or self.output_dir.get())).grid(row=row, column=2, pady=2)
+        row += 1
+
+        load_test_f = ttk.Frame(train_f)
+        load_test_f.grid(row=row, column=0, columnspan=3, sticky=tk.W, padx=4, pady=2)
+        ttk.Button(load_test_f, text="Load test data", command=self._on_load_test_data).pack(side=tk.LEFT, padx=0)
+        ttk.Label(load_test_f, text="(fills unmasked/masked/output from test_data)", font=("Segoe UI", 8), foreground="gray").pack(side=tk.LEFT, padx=8)
         row += 1
 
         ttk.Label(train_f, text="Epochs:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -344,6 +385,28 @@ class PinDetectionGUI:
         if p:
             self.masked_dir.set(p)
             self._update_eta()
+
+    def _on_load_test_data(self):
+        """Load synthetic test data paths. Avoids 'Select folder first' during EXE testing."""
+        paths = _resolve_synthetic_paths()
+        if paths:
+            u, m, out = paths
+            self.unmasked_dir.set(u)
+            self.masked_dir.set(m)
+            self.output_dir.set(out)
+            self._update_eta()
+            self.status_var.set("Test data loaded")
+        else:
+            tried = [str(Path.cwd()), str(Path.cwd().parent)]
+            if getattr(sys, "frozen", False):
+                tried.extend([str(Path(sys.executable).parent), str(Path(sys.executable).parent.parent)])
+            messagebox.showerror(
+                "Test data not found",
+                "Could not find test_data/pin_large_factory or test_data/pin_synthetic/train.\n\n"
+                "Run EXE from project root, or place test_data next to the exe.\n\n"
+                "Generate: python tools_scripts/generate_pin_test_data.py "
+                "--output-dir test_data/pin_large_factory --large-factory --large-factory-n 10"
+            )
 
     def _update_eta_label(self):
         """Update ETA label only (no scan). Called on epochs/workers spinbox change."""
