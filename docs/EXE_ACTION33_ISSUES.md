@@ -76,17 +76,20 @@
 
 ---
 
-## 5. 테스트 결과 표
+## 5. 테스트 결과 표 (2026-03-10)
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| EXE graph poll matplotlib | ✓ | EXE에서 graph 비활성화 (frozen 시 skip) |
-| Edit ROI 스퀘어·빨간 마스킹 | ✓ | Square, Brush, Erase 모드, TARGET_MARKER_RGB |
-| Edit ROI 지우기 | ✓ | Erase 모드, unmasked 복원 |
-| Select folder 에러 | ✓ | **GUI 시작 시 test_data 자동 채움** (에이전트 테스트 시 폴더 미지정 방지) |
-| annotation RED 우선 | ✓ | extract_red_mask, masked_array_to_annotations |
-| generate_pin_test_data --red-markers | ✓ | bbox_to_red_region |
+| EXE imgsz cap | ✓ | imgsz>1920 시 1920으로 cap (OOM 방지) |
+| EXE graph poll | ✓ | frozen 시 matplotlib skip |
+| Edit ROI Square 기본 | ✓ | SQUARE_SIZE 8×8, 핀마다 수십 개 지정 |
+| Edit ROI Erase | ✓ | Erase 모드, unmasked 복원 |
+| Select folder | ✓ | GUI 시작 시 test_data 자동 채움 |
+| annotation RED 우선 | ✓ | masked_array_to_annotations |
+| roi.py RED 우선 | ✓ | extract_pin_roi RED→GREEN |
 | pytest (45개) | ✓ | 통과 |
 | repro_exe_train_crash | ✓ | frozen, workers=0, cache=disk |
 | test_exe_large_train | ✓ | pin_large_factory, roi_map |
-| test_gui_auto_fill | ✓ | 시작 시 경로 자동 채움 검증 |
+| test_gui_auto_fill | ✓ | 시작 시 경로 자동 채움 |
+
+→ 상세: `docs/EXE_ACTION33_TEST_REPORT.md`

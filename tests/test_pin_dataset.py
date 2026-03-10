@@ -293,6 +293,23 @@ class TestROI(unittest.TestCase):
             self.assertGreater(cropped.shape[0], 20)
             self.assertGreater(cropped.shape[1], 60)
 
+    def test_extract_pin_roi_red_priority(self):
+        """Action #33: RED (ROI Editor target) takes priority over GREEN."""
+        from pin_detection.roi import extract_pin_roi, crop_to_roi
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            m_img = np.zeros((100, 100, 3), dtype=np.uint8)
+            m_img[:, :] = 50
+            m_img[25:35, 30:70] = [255, 0, 0]  # red band (target marker)
+            m_path = tmp / "masked.jpg"
+            Image.fromarray(m_img).save(m_path)
+            roi = extract_pin_roi(m_path, margin_ratio=0.1)
+            x1, y1, x2, y2 = roi
+            self.assertLess(x1, 35)
+            self.assertGreater(x2, 65)
+            self.assertLess(y1, 30)
+            self.assertGreater(y2, 40)
+
     def test_prepare_from_dirs_large_uses_roi(self):
         """5496x3672-like: ROI crop should produce smaller dataset images (min 30%w, 10%h)."""
         from pin_detection.dataset import prepare_yolo_dataset_from_dirs

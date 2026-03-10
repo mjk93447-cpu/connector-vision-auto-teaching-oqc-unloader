@@ -78,6 +78,11 @@ def train_pin_model(
     if imgsz_val <= 0:
         imgsz_val = 640  # fallback when no valid ROI/analysis region
 
+    # EXE: cap imgsz to avoid OOM at epoch start (Action #33, 5504→crash)
+    if getattr(sys, "frozen", False) and imgsz_val > 1920:
+        imgsz_val = 1920
+        log_step("0b. imgsz capped for EXE", "1920 (OOM prevention)")
+
     if unmasked_dir and masked_dir:
         data_yaml = prepare_yolo_dataset_from_dirs(
             Path(unmasked_dir), Path(masked_dir), dataset_dir,

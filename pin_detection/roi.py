@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from typing import Tuple
 
-from .annotation import extract_green_mask, cluster_to_bbox
+from .annotation import extract_red_mask, extract_green_mask, cluster_to_bbox
 
 # Connector is horizontal: ROI must be wide and short
 MIN_ROI_WIDTH_RATIO = 0.30   # ≥ 30% of image width
@@ -30,7 +30,10 @@ def extract_pin_roi(
     from PIL import Image
     img = np.array(Image.open(masked_path).convert("RGB"))
     h, w = img.shape[:2]
-    mask = extract_green_mask(img)
+    # RED (ROI Editor target) 우선, 없으면 GREEN (legacy). Action #33
+    mask_red = extract_red_mask(img)
+    mask_green = extract_green_mask(img)
+    mask = mask_red if mask_red.any() else mask_green
     bboxes = cluster_to_bbox(mask)
     if not bboxes:
         return 0, 0, w, h  # full image fallback

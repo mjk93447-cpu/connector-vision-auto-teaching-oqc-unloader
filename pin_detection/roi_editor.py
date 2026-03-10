@@ -21,7 +21,7 @@ except ImportError:
 ZOOM_MIN, ZOOM_MAX = 0.25, 4.0
 ZOOM_STEP = 1.15
 BRUSH_RADIUS = 4
-SQUARE_SIZE = 12  # Small square per-pin marker (Action #33)
+SQUARE_SIZE = 8  # Small square per-pin marker (Action #33) — 핀마다 수십 개 지정 가능
 ERASE_RADIUS = 10
 # Red for target masking (avoids confusion with original green markers, YOLO learns from this)
 TARGET_MARKER_RGB = (255, 0, 0)
@@ -138,7 +138,7 @@ def run_roi_editor(
     rect_m_id = [None]
     drag_start = [None]
     current_roi = [None]
-    mode = ["rect"]
+    mode = ["square"]  # Square default for per-pin marking (Action #33)
     split_mode = [False]
     current_roi_upper = [None]
     current_roi_lower = [None]
@@ -543,7 +543,7 @@ def run_roi_editor(
     nav_label.pack(side=tk.LEFT, padx=12)
     tk.Label(nav_f, text="(Left/Right keys | Scroll: zoom)", font=("Segoe UI", 8), fg="gray").pack(side=tk.LEFT, padx=4)
     ttk.Button(nav_f, text="Rectangle", command=lambda: _set_mode("rect")).pack(side=tk.LEFT, padx=2)
-    ttk.Button(nav_f, text="Square", command=lambda: _set_mode("square")).pack(side=tk.LEFT, padx=2)
+    ttk.Button(nav_f, text="Square", command=lambda: _set_mode("square")).pack(side=tk.LEFT, padx=2)  # Default: 핀마다 수십 개 지정
     ttk.Button(nav_f, text="Brush", command=lambda: _set_mode("brush")).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Erase", command=lambda: _set_mode("erase")).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Split ROI", command=_toggle_split).pack(side=tk.LEFT, padx=2)

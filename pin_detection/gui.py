@@ -28,11 +28,18 @@ def _select_dir(parent, title: str) -> str:
 def _resolve_synthetic_paths() -> tuple[str, str, str] | None:
     """
     Find test_data and return (unmasked, masked, output). Prefer pin_large_factory.
-    Tries cwd, cwd.parent, exe dir (EXE often runs from dist/).
+    Tries cwd, cwd.parent, exe dir, script dir. EXE: dist/ or project root.
     """
     candidates = [Path.cwd(), Path.cwd().parent]
     if getattr(sys, "frozen", False):
-        candidates.extend([Path(sys.executable).resolve().parent, Path(sys.executable).resolve().parent.parent])
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.extend([exe_dir, exe_dir.parent, exe_dir.parent.parent])
+    else:
+        try:
+            script_dir = Path(__file__).resolve().parent.parent
+            candidates.extend([script_dir, script_dir.parent])
+        except Exception:
+            pass
     for root in candidates:
         # pin_large_factory: root/test_data/pin_large_factory/unmasked, .../masked
         pu = root / "test_data" / "pin_large_factory" / "unmasked"
