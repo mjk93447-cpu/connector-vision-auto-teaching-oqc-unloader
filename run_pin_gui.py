@@ -37,13 +37,29 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--test-train":
         # Headless training test (for EXE verification). Run from project root.
         from pathlib import Path
+        import shutil
         root = Path.cwd()
+        out = root / "pin_models_exe_test"
+        out.mkdir(exist_ok=True)
+        # Prefer pin_unmasked_labels (unmasked+labels, Pin Masking flow)
+        unmasked = root / "test_data" / "pin_unmasked_labels" / "unmasked"
+        labels_src = root / "test_data" / "pin_unmasked_labels" / "labels"
+        if unmasked.exists() and labels_src.exists() and list(labels_src.glob("*.txt")):
+            shutil.copytree(labels_src, out / "labels", dirs_exist_ok=True)
+            roi_src = root / "test_data" / "pin_unmasked_labels" / "roi_map.json"
+            if roi_src.exists():
+                shutil.copy2(roi_src, out / "roi_map.json")
+            from pin_detection.train import train_pin_model
+            _epochs = int(os.environ.get("PIN_EXE_TEST_EPOCHS", "5"))
+            train_pin_model(unmasked_dir=unmasked, output_dir=out, epochs=_epochs)
+            (out / "exe_test_ok.txt").write_text("OK")
+            sys.exit(0)
+        # Fallback: pin_synthetic (unmasked+masked)
         unmasked = root / "test_data" / "pin_synthetic" / "unmasked"
         masked = root / "test_data" / "pin_synthetic" / "masked"
         if not unmasked.exists():
             unmasked = root / "test_data" / "pin_synthetic" / "train" / "unmasked"
             masked = root / "test_data" / "pin_synthetic" / "train" / "masked"
-        out = root / "pin_models_exe_test"
         if unmasked.exists() and masked.exists():
             from pin_detection.train import train_pin_model
             train_pin_model(unmasked_dir=unmasked, masked_dir=masked, output_dir=out, epochs=3)
