@@ -144,6 +144,30 @@ def bbox_to_green_region(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, ra
                     img[ny, nx] = [0, 255, 0]
 
 
+def bbox_to_cross_marker(img: np.ndarray, x1: int, y1: int, x2: int, y2: int, arm_len: int | None = None, thickness: int = 2) -> None:
+    """Draw green cross (+) at pad center (masked = GT). For factory-like thin markers (annotation _dilate_for_thin_markers)."""
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    h, w = img.shape[:2]
+    if arm_len is None:
+        bw, bh = x2 - x1, y2 - y1
+        arm_len = max(4, min(bw, bh) // 2)
+    green = [0, 255, 0]
+    half_t = thickness // 2
+    for dy in range(-arm_len, arm_len + 1):
+        for t in range(thickness):
+            ny = cy + dy
+            nx = cx - half_t + t
+            if 0 <= ny < h and 0 <= nx < w:
+                img[ny, nx] = green
+    for dx in range(-arm_len, arm_len + 1):
+        for t in range(thickness):
+            ny = cy - half_t + t
+            nx = cx + dx
+            if 0 <= ny < h and 0 <= nx < w:
+                img[ny, nx] = green
+
+
 def _generate_to_dir(
     out_dir: Path,
     n_pairs: int,
@@ -153,6 +177,7 @@ def _generate_to_dir(
     width: int = 640,
     height: int = 480,
     complex_bg: bool = False,
+    cross_markers: bool = False,
 ) -> None:
     unmasked_dir = out_dir / "unmasked"
     masked_dir = out_dir / "masked"
@@ -172,8 +197,9 @@ def _generate_to_dir(
         unmasked_path = unmasked_dir / f"{stem}.jpg"
         Image.fromarray(img).save(unmasked_path)
         masked_img = img.copy()
+        draw_fn = bbox_to_cross_marker if cross_markers else bbox_to_green_region
         for x1, y1, x2, y2 in bboxes:
-            bbox_to_green_region(masked_img, x1, y1, x2, y2)
+            draw_fn(masked_img, x1, y1, x2, y2)
         masked_path = masked_dir / f"{stem}.jpg"
         Image.fromarray(masked_img).save(masked_path)
         meta[stem] = {
@@ -185,10 +211,11 @@ def _generate_to_dir(
         json.dump(meta, f, indent=2)
 
 
-def _generate_large_factory(out_dir: Path, n_pairs: int = 20) -> None:
+def _generate_large_factory(out_dir: Path, n_pairs: int = 20, cross_markers: bool = False) -> None:
     """
     Generate 5000×4000 factory-like connector images (40 pins, complex background).
     Creates roi_map.json with pin-region ROI per stem (simulates GUI rectangle tool).
+    cross_markers: draw thin cross (+) instead of filled dots (factory masked style).
     """
     width, height = 5000, 4000
     unmasked_dir = out_dir / "unmasked"
@@ -211,8 +238,9 @@ def _generate_large_factory(out_dir: Path, n_pairs: int = 20) -> None:
         unmasked_path = unmasked_dir / f"{stem}.jpg"
         Image.fromarray(img).save(unmasked_path, quality=95)
         masked_img = img.copy()
+        draw_fn = bbox_to_cross_marker if cross_markers else bbox_to_green_region
         for x1, y1, x2, y2 in bboxes:
-            bbox_to_green_region(masked_img, x1, y1, x2, y2)
+            draw_fn(masked_img, x1, y1, x2, y2)
         masked_path = masked_dir / f"{stem}.jpg"
         Image.fromarray(masked_img).save(masked_path, quality=95)
 
@@ -249,32 +277,34 @@ def main() -> int:
     parser.add_argument("--n-fake-pins", type=int, default=6)
     parser.add_argument("--large-factory", action="store_true", help="5000×4000 factory-like data + roi_map.json")
     parser.add_argument("--large-factory-n", type=int, default=20, help="Number of pairs for --large-factory (default 20, use 5 for CI)")
+    parser.add_argument("--cross-markers", action="store_true", help="Draw thin cross (+) markers instead of filled dots (factory masked style)")
     args = parser.parse_args()
 
     root = _project_root()
     out = root / args.output_dir
 
     if args.large_factory:
-        _generate_large_factory(out, n_pairs=args.large_factory_n)
+        _generate_large_factory(out, n_pairs=args.large_factory_n, cross_markers=args.cross_markers)
         print(f"Generated {args.large_factory_n} pairs (5000×4000, 40 pins, complex bg) in {out}")
         return 0
 
     if args.n_pairs > 0:
         # Legacy: single set
         _generate_to_dir(out, args.n_pairs, 42, args.blur_prob, args.n_fake_pins,
-                        width=args.width, height=args.height)
+                        width=args.width, height=args.height, cross_markers=args.cross_markers)
         print(f"Generated {args.n_pairs} pairs in {out}")
     else:
         train_dir = out / "train"
         test_dir = out / "test"
         _generate_to_dir(train_dir, args.train_pairs, 0, args.blur_prob, args.n_fake_pins,
-                         width=args.width, height=args.height)
+                         width=args.width, height=args.height, cross_markers=args.cross_markers)
         _generate_to_dir(test_dir, args.test_pairs, 1000, args.blur_prob, args.n_fake_pins,
-                         width=args.width, height=args.height)
+                         width=args.width, height=args.height, cross_markers=args.cross_markers)
         print(f"Generated train: {args.train_pairs} pairs in {train_dir}")
         print(f"Generated test:  {args.test_pairs} pairs in {test_dir}")
     print(f"  unmasked: grayscale, 20 upper + 20 lower rectangular pads, {args.n_fake_pins} fake dots")
-    print(f"  masked:   green only on real pads (40 total)")
+    marker_type = "cross (+)" if args.cross_markers else "filled dots"
+    print(f"  masked:   green {marker_type} on real pads (40 total)")
     return 0
 
 
