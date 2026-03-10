@@ -17,12 +17,23 @@ import sys
 os.environ["YOLO_OFFLINE"] = "true"
 
 # Fix PyInstaller GUI: stdout/stderr are None when console=False
+# PIN_DEBUG=1: redirect stderr to %TEMP%/pin_train_debug.log to capture crash tracebacks
+_debug = os.environ.get("PIN_DEBUG", "").strip() in ("1", "true", "yes")
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
+    if _debug:
+        try:
+            _log = os.path.join(os.environ.get("TEMP", os.environ.get("TMP", ".")), "pin_train_debug.log")
+            sys.stderr = open(_log, "a", encoding="utf-8")
+        except Exception:
+            sys.stderr = open(os.devnull, "w")
+    else:
+        sys.stderr = open(os.devnull, "w")
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()  # Windows multiprocessing 필수 (EXE workers 가능성)
     if len(sys.argv) > 1 and sys.argv[1] == "--test-train":
         # Headless training test (for EXE verification). Run from project root.
         from pathlib import Path

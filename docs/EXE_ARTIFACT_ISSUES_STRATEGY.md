@@ -72,31 +72,30 @@
 
 ---
 
-## 4. 이슈 3: Image size 입력 시 렉 및 ROI 비활성화와 불일치
+## 4. 이슈 3: Image size 입력 시 렉
 
 ### 4.1 심층 분석
 
 | 항목 | 내용 |
 |------|------|
-| **ROI 비활성화** | ROADMAP 10.18: 학습·추론 모두 ROI off, 전체 이미지 사용. imgsz=640 고정 권장 |
-| **GUI 현황** | imgsz Spinbox가 항상 노출. `sb_imgsz.bind("<KeyRelease>", _update_eta)` |
-| **렉 원인** | **키 입력마다** `_update_eta` 호출 → `analyze_dataset_for_training` 실행 (메인 스레드) |
-| **결론** | KeyRelease 시 전체 데이터셋 스캔이 매 키마다 실행됨 |
+| **ROADMAP 10.0** | imgsz = ROI 박스 크기에서만 파생. 수동 입력 없음 |
+| **GUI 현황 (과거)** | imgsz Spinbox 노출, KeyRelease 시 `_update_eta` → analyze 실행 (메인 스레드) |
+| **렉 원인** | 키 입력마다 전체 데이터셋 스캔 실행 |
+| **결론** | imgsz 수동 입력 제거, ROI 기반 읽기전용 표시로 해소 |
 
-### 4.2 대응 전략
+### 4.2 대응 전략 (완료)
 
 | Phase | 작업 | 목표 |
 |-------|------|------|
-| **A** | KeyRelease 디바운스 | 300–500ms 디바운스. 입력 멈춘 뒤 1회만 _update_eta |
-| **B** | ROI off 시 imgsz 단순화 | ROI 비활성화 시: imgsz 고정 640, Spinbox 숨기거나 읽기 전용 |
-| **C** | analyze 호출 제거 (ETA만) | ETA 계산은 n, imgsz, epochs, workers만 사용. analyze는 "Apply suggested" 시에만 |
+| **A** | analyze 호출 제거 (ETA만) | ETA는 n, imgsz, epochs, workers만 사용. analyze는 "Apply suggested" 시에만 |
+| **B** | imgsz UI 단순화 | Spinbox 제거, ROI 박스 크기 기반 읽기전용 라벨 |
+| **C** | ROI=분석영역 일원화 | roi_map 있으면 imgsz=ROI 크기. 없으면 전체 이미지 크기 (10.0 원칙) |
 
-### 4.3 구현 순서
+### 4.3 구현 순서 (완료)
 
-1. `_update_eta`에서 `analyze_dataset_for_training` 호출 제거. ETA는 `_estimate_training_time(n, imgsz, epochs, workers)`만 사용
-2. "Apply suggested" 클릭 시에만 별도 스레드로 analyze 실행
-3. imgsz KeyRelease에 디바운스 (또는 analyze 제거로 해소)
-4. ROI off 정책에 맞춰 imgsz UI: (옵션 A) 640 고정·라벨만 표시 (옵션 B) Spinbox 유지하되 analyze 연동 제거
+1. `_update_eta`에서 `analyze_dataset_for_training` 호출 제거. ETA는 `_estimate_training_time(n, imgsz, epochs, workers)`만 사용 ✓
+2. "Apply suggested" 클릭 시에만 별도 스레드로 analyze 실행 ✓
+3. imgsz Spinbox 제거, ROI 기반 읽기전용 라벨 ✓
 
 ---
 
@@ -119,7 +118,7 @@
 |------|------|
 | #1 | 일반 사용자 권한으로 EXE 실행, DLL 에러 없음 |
 | #2 | Masked folder 선택 후 5초 이내 UI 응답, 2분 렉 없음 |
-| #3 | imgsz 입력 시 렉 없음. ROI off 시 imgsz 640 고정 또는 UI 정리 |
+| #3 | imgsz 입력 시 렉 없음. imgsz=ROI 기반 읽기전용 표시 |
 
 ---
 
@@ -128,5 +127,5 @@
 | 이슈 | 구현 |
 |------|------|
 | #2 | _update_eta에서 analyze 제거. 백그라운드 스레드로 "Apply suggested" 스캔. 즉시 n/w×h/ETA 표시 |
-| #3 | imgsz Spinbox 제거, "640 (fixed, ROI off)" 라벨로 대체. KeyRelease 바인딩 제거 |
+| #3 | imgsz Spinbox 제거, ROI 박스 크기 기반 읽기전용 라벨. KeyRelease 바인딩 제거 |
 | #1 | uac_admin=False, manifest_asinvoker.xml, build_pin_exe_onedir.bat, DOWNLOAD_EXE.md VC++ 안내 |

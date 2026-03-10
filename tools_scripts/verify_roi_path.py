@@ -1,6 +1,9 @@
 """
 Verify ROI delivery path and roi_map usage before factory testing.
 Run: python tools_scripts/verify_roi_path.py
+
+Uses pin_large_factory (CI) or pin_synthetic as test data.
+CI generates pin_large_factory before this step; local: run generate_pin_test_data --large-factory first.
 """
 import json
 import sys
@@ -9,23 +12,41 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
+
+
+def _resolve_test_data() -> tuple[Path, Path] | None:
+    """Resolve unmasked/masked dirs. Prefer pin_large_factory (CI), fallback pin_synthetic."""
+    # 1. pin_large_factory (CI: --large-factory generates this before verify)
+    large = ROOT / "test_data" / "pin_large_factory"
+    u_large = large / "unmasked"
+    m_large = large / "masked"
+    if u_large.exists() and m_large.exists() and list(u_large.glob("*.jpg")):
+        return u_large, m_large
+    # 2. pin_synthetic (train or root)
+    syn = ROOT / "test_data" / "pin_synthetic"
+    u_syn = syn / "train" / "unmasked" if (syn / "train" / "unmasked").exists() else syn / "unmasked"
+    m_syn = syn / "train" / "masked" if (syn / "train" / "masked").exists() else syn / "masked"
+    if u_syn.exists() and m_syn.exists() and list(u_syn.glob("*.jpg")):
+        return u_syn, m_syn
+    return None
+
 
 def _test_roi_map_load_path():
     """Verify dataset loads roi_map from output_dir.parent or output_dir."""
     from pin_detection.dataset import prepare_yolo_dataset_from_dirs
 
-    base = ROOT / "test_data" / "pin_synthetic"
-    unmasked = base / "train" / "unmasked" if (base / "train" / "unmasked").exists() else base / "unmasked"
-    masked = base / "train" / "masked" if (base / "train" / "masked").exists() else base / "masked"
-    if not unmasked.exists() or not list(unmasked.glob("*.jpg")):
-        print("SKIP: No test data (run generate_pin_test_data first)")
+    resolved = _resolve_test_data()
+    if not resolved:
+        print("SKIP: No test data (run generate_pin_test_data --large-factory or default first)")
         return True
 
+    unmasked, masked = resolved
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         roi_path = root / "roi_map.json"
-        u_files = [f for f in unmasked.iterdir() if f.suffix.lower() in {".jpg", ".png", ".bmp"}][:3]
+        u_files = [f for f in unmasked.iterdir() if f.suffix.lower() in IMG_EXTS][:3]
         roi_map = {f.stem: [20, 20, 150, 120] for f in u_files}
         with open(roi_path, "w") as f:
             json.dump(roi_map, f, indent=2)
@@ -52,20 +73,19 @@ def _test_roi_map_in_output_dir():
     """Verify roi_map at output_dir (dataset_dir) also works."""
     from pin_detection.dataset import prepare_yolo_dataset_from_dirs
 
-    base = ROOT / "test_data" / "pin_synthetic"
-    unmasked = base / "train" / "unmasked" if (base / "train" / "unmasked").exists() else base / "unmasked"
-    masked = base / "train" / "masked" if (base / "train" / "masked").exists() else base / "masked"
-    if not unmasked.exists() or not list(unmasked.glob("*.jpg")):
+    resolved = _resolve_test_data()
+    if not resolved:
         print("SKIP: No test data")
         return True
 
+    unmasked, masked = resolved
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         dataset_dir = root / "dataset"
         dataset_dir.mkdir(parents=True)
         roi_path = dataset_dir / "roi_map.json"
-        u_files = [f for f in unmasked.iterdir() if f.suffix.lower() in {".jpg", ".png", ".bmp"}][:2]
+        u_files = [f for f in unmasked.iterdir() if f.suffix.lower() in IMG_EXTS][:2]
         roi_map = {f.stem: [10, 10, 80, 60] for f in u_files}
         with open(roi_path, "w") as f:
             json.dump(roi_map, f, indent=2)
@@ -98,6 +118,12 @@ def _test_roi_editor_save_path():
 def main() -> int:
     print("ROI path & roi_map verification")
     print("-" * 40)
+    resolved = _resolve_test_data()
+    if resolved:
+        src = "pin_large_factory" if "pin_large_factory" in str(resolved[0]) else "pin_synthetic"
+        print(f"  Test data: {src}")
+    else:
+        print("  Test data: none (roi_map tests will SKIP)")
     try:
         _test_roi_editor_save_path()
         _test_roi_map_load_path()

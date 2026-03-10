@@ -43,9 +43,12 @@ def main() -> int:
 
     # Train (frozen mode: cache=disk, workers=0)
     from pin_detection.train import train_pin_model
-    from pin_detection.debug_log import clear_log
 
-    clear_log()
+    try:
+        from pin_detection.debug_log import clear_log
+        clear_log()
+    except ImportError:
+        pass  # debug_log optional, not in repo on fresh checkout
     print("Starting train (frozen mode, 2 epochs, imgsz=640)...")
     try:
         result = train_pin_model(

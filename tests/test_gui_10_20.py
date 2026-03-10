@@ -10,7 +10,7 @@ import pytest
 
 
 def test_roi_editor_load_save():
-    """Test roi_map load/save."""
+    """Test roi_map load/save (single and split format)."""
     from pin_detection.roi_editor import load_roi_map, save_roi_map
 
     with tempfile.TemporaryDirectory() as d:
@@ -22,6 +22,12 @@ def test_roi_editor_load_save():
         assert p.exists()
         loaded = load_roi_map(p)
         assert loaded == roi_map
+
+        split_roi = {"03": {"upper": [0, 0, 400, 200], "lower": [0, 200, 400, 400]}}
+        save_roi_map(p, {**roi_map, **split_roi})
+        loaded2 = load_roi_map(p)
+        assert loaded2["01"] == roi_map["01"]
+        assert loaded2["03"] == split_roi["03"]
 
 
 def test_dataset_roi_map_integration():

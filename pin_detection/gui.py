@@ -41,10 +41,10 @@ def _estimate_training_time(n_images: int, imgsz: int, epochs: int, workers: int
     Conservative estimate in seconds for CPU training.
     Base: ~6 sec per image per epoch at 640px (CPU, no GPU).
     Scale by (imgsz/640)^2. Workers help data loading (~1.2x with 4 workers).
+    imgsz from ROI only; no cap.
     """
-    if n_images <= 0:
+    if n_images <= 0 or imgsz <= 0:
         return 0.0
-    imgsz = min(imgsz, 4096)  # sane max for estimate (ROADMAP 10.20: no hard cap)
     base_per_epoch = n_images * 6.0 * (imgsz / 640) ** 2
     worker_factor = 1.0 + 0.05 * min(workers, 4)
     return base_per_epoch * epochs / worker_factor
@@ -87,9 +87,9 @@ STEP 3: Output folder
 
 STEP 4: Training parameters
   • Epochs: Number of training passes (100–200 typical). More = better but slower.
-  • Image size (imgsz): Input resolution. 320–4096, no cap. Larger = more accurate but slower.
+  • Image size: ROI box dimensions only. No manual input; crop region = analysis size.
   • Workers: Data loading threads. Set to match your CPU cores for faster training.
-  • Suggested: After selecting folders, click "Apply suggested" to auto-set imgsz, epochs, val_split based on dataset scan.
+  • Suggested: After selecting folders and Edit ROI, click "Apply suggested" to auto-set epochs, val_split.
 
 STEP 5: ROI Editor (optional, for large images)
   • Click "Edit ROI" to see unmasked (YOLO input) and masked (ground truth) side by side.
@@ -133,8 +133,9 @@ STEP 4: Run inference
 ================================================================================
 
   • First run: Use 10 image pairs for training. Ensure green dots cover the full pin area.
-  • Slow training? Increase Workers; reduce imgsz or epochs.
-  • Poor detection? Try more epochs (150–200) or larger imgsz (1280).
+  • Slow training? Increase Workers; reduce epochs. (imgsz from ROI, batch auto-scales.)
+  • OOM? Batch auto-scales by imgsz; Edit ROI to smaller region if needed.
+  • Poor detection? Try more epochs (150–200); ROI region should cover all pins.
 """
 
 
@@ -150,7 +151,7 @@ class PinDetectionGUI:
         self.model_path = tk.StringVar()
         self.output_dir = tk.StringVar(value="pin_models")
         self.epochs_var = tk.IntVar(value=100)
-        self.imgsz_var = tk.IntVar(value=640)
+        self._imgsz_from_roi = 0  # Read-only, derived from ROI (0 = not set)
         self.workers_var = tk.IntVar(value=min(os.cpu_count() or 4, 4))  # cap 4 for Windows stability
         self._train_stop = threading.Event()
 
@@ -187,11 +188,11 @@ class PinDetectionGUI:
         sb_epochs.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
         row += 1
 
-        # imgsz: user-specified, no cap (ROADMAP 10.20)
-        ttk.Label(train_f, text="Image size (imgsz):").grid(row=row, column=0, sticky=tk.W, pady=2)
-        sb_imgsz = ttk.Spinbox(train_f, from_=320, to=4096, increment=64, textvariable=self.imgsz_var, width=8, command=self._update_eta)
-        sb_imgsz.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
-        ttk.Label(train_f, text="(320–4096)").grid(row=row, column=2, sticky=tk.W, pady=2)
+        # ROI box size = analysis size; read-only, no manual input
+        ttk.Label(train_f, text="Image size:").grid(row=row, column=0, sticky=tk.W, pady=2)
+        self.imgsz_label = ttk.Label(train_f, text="—", foreground="gray")
+        self.imgsz_label.grid(row=row, column=1, sticky=tk.W, padx=4, pady=2)
+        ttk.Label(train_f, text="(from ROI, auto)").grid(row=row, column=2, sticky=tk.W, pady=2)
         row += 1
 
         ttk.Label(train_f, text="Workers:").grid(row=row, column=0, sticky=tk.W, pady=2)
@@ -277,7 +278,7 @@ class PinDetectionGUI:
         train_f.columnconfigure(1, weight=1)
 
         # Bind spinbox for ETA update (lightweight — no scan restart)
-        for c in [sb_epochs, sb_imgsz, sb_workers]:
+        for c in [sb_epochs, sb_workers]:
             c.bind("<KeyRelease>", lambda e: self._update_eta_label())
 
         # Inference tab
@@ -344,7 +345,7 @@ class PinDetectionGUI:
             self._update_eta()
 
     def _update_eta_label(self):
-        """Update ETA label only (no scan). Called on imgsz/epochs/workers spinbox change."""
+        """Update ETA label only (no scan). Called on epochs/workers spinbox change."""
         u = self.unmasked_dir.get().strip()
         m = self.masked_dir.get().strip()
         if not u or not m:
@@ -359,11 +360,7 @@ class PinDetectionGUI:
                 workers = int(self.workers_var.get())
             except Exception:
                 workers = _default_workers()
-            try:
-                imgsz = int(self.imgsz_var.get())
-            except Exception:
-                imgsz = 640
-            imgsz = max(320, min(imgsz, 4096))
+            imgsz = getattr(self, "_imgsz_from_roi", 0) or 640
             sec = _estimate_training_time(n, imgsz, self.epochs_var.get(), workers)
             self.eta_label.config(text=_format_duration(sec))
         except Exception:
@@ -403,11 +400,17 @@ class PinDetectionGUI:
                 workers = int(self.workers_var.get())
             except Exception:
                 workers = _default_workers()
-            try:
-                imgsz = int(self.imgsz_var.get())
-            except Exception:
-                imgsz = 640
-            imgsz = max(320, min(imgsz, 4096))  # sane range, no hard cap
+            # imgsz from ROI only (ROADMAP: ROI sole determinant)
+            out = self.output_dir.get().strip()
+            if out:
+                try:
+                    from .dataset import load_roi_map_and_imgsz
+                    _, imgsz_val = load_roi_map_and_imgsz(Path(out), pu, pm)
+                    self._imgsz_from_roi = imgsz_val
+                    self.imgsz_label.config(text=str(imgsz_val) if imgsz_val > 0 else "—")
+                except Exception:
+                    pass
+            imgsz = getattr(self, "_imgsz_from_roi", 0) or 640  # 640 only for ETA when unknown
             sec = _estimate_training_time(n, imgsz, self.epochs_var.get(), workers)
             self.eta_label.config(text=_format_duration(sec))
 
@@ -421,7 +424,9 @@ class PinDetectionGUI:
             def _scan():
                 try:
                     from .dataset import analyze_dataset_for_training
-                    s = analyze_dataset_for_training(pu, pm, max_samples=3)
+                    out = self.output_dir.get().strip()
+                    out_p = Path(out) if out else None
+                    s = analyze_dataset_for_training(pu, pm, max_samples=3, output_dir=out_p)
                     if getattr(self, "_scan_cancel", True):
                         return
                     self.root.after(0, lambda: self._on_scan_done(s, (u, m)))
@@ -451,15 +456,19 @@ class PinDetectionGUI:
         epochs = suggested.get("epochs", 3)
         mosaic = suggested.get("mosaic", 0.0)
         note = suggested.get("note", "")
-        imgsz_sug = suggested.get("imgsz", 640)
-        self.suggested_label.config(text=f"imgsz:{imgsz_sug}, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
+        imgsz_sug = suggested.get("imgsz", 0)
+        self._imgsz_from_roi = imgsz_sug
+        self.imgsz_label.config(text=str(imgsz_sug) if imgsz_sug > 0 else "—")
+        imgsz_txt = str(imgsz_sug) if imgsz_sug > 0 else "—"
+        self.suggested_label.config(text=f"imgsz:{imgsz_txt}, epochs:{epochs}, mosaic:{mosaic}" + (f" ({note})" if note else ""))
         self.apply_suggested_btn.config(state=tk.NORMAL)
 
     def _on_apply_suggested(self):
         if not getattr(self, "_suggested", None):
             return
         s = self._suggested
-        self.imgsz_var.set(min(s.get("imgsz", 640), 4096))
+        self._imgsz_from_roi = s.get("imgsz", 0)
+        self.imgsz_label.config(text=str(self._imgsz_from_roi) if self._imgsz_from_roi > 0 else "—")
         self.epochs_var.set(s.get("epochs", 3))
         self.val_split_var.set(s.get("val_split", 0.2))
         self.mosaic_var.set(s.get("mosaic", 0.0))
@@ -523,6 +532,9 @@ class PinDetectionGUI:
 
         def run():
             try:
+                from .debug_log import clear_log, log_step
+                clear_log()
+                log_step("0. Train thread started")
                 self.root.after(0, lambda: self.train_progress.start(10))
                 self.root.after(0, lambda: self.train_status.config(text="Preparing dataset..."))
                 self.root.after(0, lambda: self.status_var.set("Training..."))
@@ -545,28 +557,25 @@ class PinDetectionGUI:
                     Path(out_dir) / "pin_run",
                     Path("runs") / "detect" / Path(out_dir).name / "pin_run",
                 ]
+                log_step("0a. Starting graph poll (matplotlib)")
                 self._start_graph_poll(candidates)
+                log_step("0b. Graph poll started")
 
                 try:
                     workers = int(self.workers_var.get())
                 except Exception:
                     workers = None
                 try:
-                    imgsz = int(self.imgsz_var.get())
-                except Exception:
-                    imgsz = 640
-                imgsz = max(320, min(imgsz, 4096))  # sane range, no hard cap (ROADMAP 10.20)
-                try:
                     mosaic_val = float(self.mosaic_var.get())
                     mosaic_val = max(0.0, min(1.0, mosaic_val))
                 except Exception:
                     mosaic_val = 0.0
+                log_step("0c. Calling train_pin_model (imgsz from ROI)")
                 model_path = train_pin_model(
                     unmasked_dir=u,
                     masked_dir=m,
                     output_dir=out_dir,
                     epochs=self.epochs_var.get(),
-                    imgsz=imgsz,
                     workers=workers,
                     val_split=val_split,
                     stop_event=self._train_stop,
@@ -611,8 +620,9 @@ class PinDetectionGUI:
                 w.destroy()
             self._graph_canvas = FigureCanvasTkAgg(fig, master=self.graph_frame)
             self._graph_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        except ImportError:
+        except Exception:
             self._graph_canvas = None
+            self._graph_ax = None
         self._graph_save_dir = save_dir if isinstance(save_dir, list) else [save_dir]
         self._graph_poll_id = None
         self._last_logged_epoch = -1
@@ -720,7 +730,11 @@ class PinDetectionGUI:
             return
 
         out_dir = self.inference_output_dir.get().strip()
-        base_dir = Path(out_dir) if out_dir else Path(img_path).parent
+        from .results_path import get_results_root, get_timestamped_dir
+        if out_dir:
+            base_dir = get_timestamped_dir(Path(out_dir))
+        else:
+            base_dir = get_timestamped_dir(get_results_root())
         out_img_path = base_dir / f"{Path(img_path).stem}_masked.png"
         excel_out = base_dir / "result.xlsx"
         try:

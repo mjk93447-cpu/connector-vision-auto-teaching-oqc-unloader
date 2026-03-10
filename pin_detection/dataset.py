@@ -18,6 +18,72 @@ from .roi import extract_pin_roi, crop_to_roi
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 ROI_SIZE_THRESHOLD = 2000  # max(w,h) > this → use ROI crop
+YOLO_STRIDE = 32  # YOLO model requirement; no user min/max
+
+
+def imgsz_from_roi_map(roi_map: dict) -> int:
+    """
+    Derive imgsz from ROI box dimensions. ROADMAP: ROI is sole determinant.
+    imgsz = max over all ROIs of max(w,h), rounded to YOLO stride. No min/max clamp.
+    """
+    if not roi_map:
+        return 0
+    max_dim = 0
+    for v in roi_map.values():
+        boxes = []
+        if isinstance(v, (list, tuple)) and len(v) == 4:
+            boxes = [v[:4]]
+        elif isinstance(v, dict) and "upper" in v and "lower" in v:
+            if isinstance(v["upper"], (list, tuple)) and len(v["upper"]) == 4:
+                boxes.append(v["upper"][:4])
+            if isinstance(v["lower"], (list, tuple)) and len(v["lower"]) == 4:
+                boxes.append(v["lower"][:4])
+        for x1, y1, x2, y2 in boxes:
+            w, h = abs(x2 - x1), abs(y2 - y1)
+            max_dim = max(max_dim, w, h)
+    if max_dim <= 0:
+        return 0
+    return ((max_dim + YOLO_STRIDE - 1) // YOLO_STRIDE) * YOLO_STRIDE
+
+
+def load_roi_map_and_imgsz(
+    output_dir: Path,
+    unmasked_dir: Path | None = None,
+    masked_dir: Path | None = None,
+) -> tuple[dict, int]:
+    """
+    Load roi_map from output_dir.parent or output_dir.
+    Return (roi_map, imgsz). imgsz from roi_map when non-empty (ROI sole determinant).
+    When no roi_map: fallback to analyze_dataset (full-image region) or 0.
+    """
+    import json
+    output_dir = Path(output_dir)
+    roi_map_path = output_dir.parent / "roi_map.json"
+    if not roi_map_path.exists():
+        roi_map_path = output_dir / "roi_map.json"
+    roi_map = {}
+    if roi_map_path.exists():
+        try:
+            with open(roi_map_path) as f:
+                raw = json.load(f)
+            roi_map = {}
+            for k, v in raw.items():
+                if isinstance(v, (list, tuple)) and len(v) == 4:
+                    roi_map[k] = list(v)
+                elif isinstance(v, dict) and "upper" in v and "lower" in v:
+                    u, l = v.get("upper"), v.get("lower")
+                    if isinstance(u, (list, tuple)) and len(u) == 4 and isinstance(l, (list, tuple)) and len(l) == 4:
+                        roi_map[k] = {"upper": list(u), "lower": list(l)}
+        except Exception:
+            pass
+    if roi_map:
+        imgsz = imgsz_from_roi_map(roi_map)
+    elif unmasked_dir and masked_dir:
+        s = analyze_dataset_for_training(unmasked_dir, masked_dir, max_samples=3)
+        imgsz = s.get("imgsz", 0)
+    else:
+        imgsz = 0
+    return roi_map, imgsz
 
 # Cell ID: A2HD + alphanumeric (e.g. A2HD001, A2HD12345)
 CELL_ID_PATTERN = re.compile(r"(A2HD[A-Za-z0-9]+)", re.IGNORECASE)
@@ -129,17 +195,38 @@ def analyze_dataset_for_training(
     unmasked_dir: Path,
     masked_dir: Path,
     max_samples: int = 5,
+    output_dir: Path | None = None,
 ) -> dict:
     """
     Quick scan of dataset to suggest optimal training parameters.
-    Samples up to max_samples images, extracts image size and pin bbox sizes.
+    When output_dir and roi_map exist: imgsz from ROI (ROADMAP: ROI sole determinant).
+    Else: samples from full images.
     Returns: {imgsz, epochs, val_split, note, pin_avg_w, pin_avg_h, n_images, img_w, img_h}.
     """
     unmasked_dir = Path(unmasked_dir)
     masked_dir = Path(masked_dir)
     u_files = sorted([f for f in unmasked_dir.iterdir() if f.suffix.lower() in IMG_EXTS], key=lambda p: p.name)
     if not u_files:
-        return {"imgsz": 640, "epochs": 100, "val_split": 0.2, "note": "No images"}
+        return {"imgsz": 0, "epochs": 100, "val_split": 0.2, "note": "No images"}
+
+    # ROI takes precedence: imgsz from roi_map when present (ROADMAP: ROI sole determinant)
+    if output_dir:
+        roi_map, roi_imgsz = load_roi_map_and_imgsz(Path(output_dir), unmasked_dir, masked_dir)
+        if roi_map:
+            n_images = len(u_files)
+            val_split = 0.0 if n_images < 5 else 0.2
+            return {
+                "imgsz": roi_imgsz,
+                "epochs": 100,
+                "val_split": val_split,
+                "mosaic": 0.0,
+                "note": "from ROI",
+                "pin_avg_w": 0,
+                "pin_avg_h": 0,
+                "n_images": n_images,
+                "img_w": 0,
+                "img_h": 0,
+            }
 
     n_images = len(u_files)
     samples = u_files[: min(max_samples, len(u_files))]
@@ -168,25 +255,20 @@ def analyze_dataset_for_training(
     img_h = img_sizes[0][1] if img_sizes else 0
     max_dim = max(img_w, img_h) if img_sizes else 0
 
-    # imgsz: suggestion only, no hard cap (ROADMAP 10.20). User can override 320–4096.
-    imgsz = 640
+    # imgsz: from analysis region only (ROI or full image). No min/max.
+    imgsz = ((max_dim + YOLO_STRIDE - 1) // YOLO_STRIDE) * YOLO_STRIDE if max_dim > 0 else 0
     note_parts = []
 
     if max_dim > ROI_SIZE_THRESHOLD:
-        imgsz = 640
-        note_parts.append("full image (ROI off)")
+        note_parts.append("full image (no roi_map)")
     elif max_dim > 0:
         if pin_widths and pin_heights:
             avg_w = sum(pin_widths) / len(pin_widths)
             avg_h = sum(pin_heights) / len(pin_heights)
             if avg_w * avg_h < 120 or avg_w < 12 or avg_h < 8:
-                imgsz = min(4096, max(640, max_dim))
                 note_parts.append("small pins")
             elif max_dim < 640:
-                imgsz = min(4096, max(640, max_dim))
                 note_parts.append("match resolution")
-        else:
-            imgsz = min(4096, max(640, max_dim)) if max_dim > 400 else 640
 
     epochs = 100  # Higher epochs for better P/R (EXE_TEST_FEEDBACK 10.20.2)
 
@@ -320,7 +402,15 @@ def prepare_yolo_dataset_from_dirs(
             try:
                 import json
                 with open(roi_map_path) as f:
-                    roi_map = {k: list(v) for k, v in json.load(f).items() if isinstance(v, (list, tuple)) and len(v) == 4}
+                    raw = json.load(f)
+                roi_map = {}
+                for k, v in raw.items():
+                    if isinstance(v, (list, tuple)) and len(v) == 4:
+                        roi_map[k] = list(v)
+                    elif isinstance(v, dict) and "upper" in v and "lower" in v:
+                        u, l = v.get("upper"), v.get("lower")
+                        if isinstance(u, (list, tuple)) and len(u) == 4 and isinstance(l, (list, tuple)) and len(l) == 4:
+                            roi_map[k] = {"upper": list(u), "lower": list(l)}
             except Exception:
                 roi_map = {}
         else:
@@ -345,8 +435,15 @@ def prepare_yolo_dataset_from_dirs(
 
     def _get_roi(u_path: Path) -> tuple[int, int, int, int] | None:
         stem = u_path.stem
-        if stem in roi_map and len(roi_map[stem]) == 4:
-            return tuple(roi_map[stem])
+        if stem not in roi_map:
+            return None
+        v = roi_map[stem]
+        if isinstance(v, (list, tuple)) and len(v) == 4:
+            return tuple(v)
+        if isinstance(v, dict) and "upper" in v and "lower" in v:
+            u, l = v["upper"], v["lower"]
+            if len(u) == 4 and len(l) == 4:
+                return (min(u[0], l[0]), min(u[1], l[1]), max(u[2], l[2]), max(u[3], l[3]))
         return None
 
     all_files = list(train_files) + list(val_files)

@@ -23,7 +23,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             excel_path=args.excel,
             output_dir=args.output_dir,
             epochs=args.epochs,
-            imgsz=args.imgsz,
+            batch=args.batch,
             workers=args.workers,
             val_split=getattr(args, "val_split", 0.2),
         )
@@ -34,7 +34,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             excel_path=args.excel,
             output_dir=args.output_dir,
             epochs=args.epochs,
-            imgsz=args.imgsz,
+            batch=args.batch,
             workers=args.workers,
         )
     else:
@@ -44,10 +44,22 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 
 def cmd_inference(args: argparse.Namespace) -> int:
+    from .results_path import get_results_root, get_timestamped_dir
+
+    img_path = Path(args.image)
+    out_img = args.output_image
+    excel_out = args.output_excel
+    if not out_img or not excel_out:
+        base_dir = get_timestamped_dir(get_results_root())
+        if not out_img:
+            out_img = base_dir / f"{img_path.stem}_masked.png"
+        if not excel_out:
+            excel_out = base_dir / "result.xlsx"
+
     img, detections, masked = run_inference(
         model_path=args.model,
         image_path=args.image,
-        output_image_path=args.output_image,
+        output_image_path=out_img,
         conf_threshold=args.conf,
     )
     h, w = img.shape[:2]
@@ -62,7 +74,8 @@ def cmd_inference(args: argparse.Namespace) -> int:
     if args.excel_format:
         format_ref = load_excel_format(args.excel_format)
 
-    excel_out = args.output_excel or (Path(args.image).parent / "result.xlsx")
+    excel_out = Path(excel_out)
+    excel_out.parent.mkdir(parents=True, exist_ok=True)
     write_result_excel(
         excel_out,
         upper_count=len(upper),
@@ -108,8 +121,8 @@ def main() -> int:
     train_p.add_argument("--masked-dir", dest="masked_dir", help="Dir with 10 masked images")
     train_p.add_argument("--excel", help="Reference Excel or dir (format)")
     train_p.add_argument("--output-dir", default="pin_models", help="Output directory")
-    train_p.add_argument("--epochs", type=int, default=100)
-    train_p.add_argument("--imgsz", type=int, default=640)
+    train_p.add_argument("--epochs", type=int, default=3, help="Epochs (default 3 for fast training)")
+    train_p.add_argument("--batch", type=int, default=None, help="Batch size (default: auto-scale by imgsz to avoid OOM)")
     train_p.add_argument("--workers", type=int, default=None, help="Data loading workers (default: cpu_count)")
     train_p.add_argument("--val-split", type=float, default=0.2, dest="val_split", help="Validation split (0.2 = 80%% train)")
     train_p.set_defaults(func=cmd_train)

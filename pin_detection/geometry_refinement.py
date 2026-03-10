@@ -1,8 +1,12 @@
 """
-Geometry-based refinement for pin detection.
-Leverages fixed layout: 20 upper + 20 lower, horizontal alignment, ~uniform spacing.
-Goal: Precision/Recall → 100% via interpolation (FN) and slot capping (FP).
-Includes: Y-band filter, outlier removal, bounds clamp, empty-row handling.
+Geometry-based refinement for pin detection (auxiliary/secondary).
+
+Design: YOLO is primary. Geometry refinement is a smart auxiliary for edge cases:
+- FN (< 20 per row): interpolate missing pins using uniform spacing
+- FP (> 20 per row): keep top 20 by confidence
+- FP (wrong location): verify spatial consistency, remove if unlikely (spacing anomaly)
+
+Uses: 20+20 fixed layout, nearly parallel, ~uniform spacing.
 """
 from typing import List, Tuple
 
@@ -13,6 +17,10 @@ UPPER_Y_MIN, UPPER_Y_MAX = 0.03, 0.52
 LOWER_Y_MIN, LOWER_Y_MAX = 0.42, 0.97
 # Valid x range for interpolated positions
 X_MIN_VALID, X_MAX_VALID = 0.02, 0.98
+# Spacing anomaly: gap ratio > this suggests FP (wrong location)
+GAP_ANOMALY_RATIO = 2.5
+# Max y deviation from row (normalized) for FP verification
+Y_DEVIATION_FOR_VERIFY = 0.08
 
 
 def _filter_by_y_band(
@@ -41,7 +49,6 @@ def _remove_y_outliers(
         return row_dets, row_confs
     ys = [d[1] for d in row_dets]
     med, std = np.median(ys), np.std(ys) or 1e-6
-    thresh = med + sigma * std
     out_d, out_c = [], [] if row_confs else None
     for i, d in enumerate(row_dets):
         if abs(d[1] - med) <= sigma * std:
@@ -49,6 +56,46 @@ def _remove_y_outliers(
             if row_confs:
                 out_c.append(row_confs[i])
     return out_d or row_dets, out_c or row_confs
+
+
+def _verify_and_remove_fp_wrong_location(
+    row_dets: List[Tuple[float, float, float, float]],
+    row_confs: List[float] | None,
+    w: int,
+    n_slots: int = 20,
+) -> Tuple[List[Tuple], List[float] | None]:
+    """
+    Verify detections: remove those in wrong location (spacing anomaly).
+    Pins are nearly parallel with uniform spacing. A pin creating a gap ratio
+    > GAP_ANOMALY_RATIO vs median gap is likely FP (dust, scratch).
+    Remove lowest-confidence pin in anomalous region; repeat until len <= n_slots.
+    """
+    paired = list(zip(row_dets, row_confs or [1.0] * len(row_dets)))
+    while len(paired) > n_slots and len(paired) >= 4:
+        paired.sort(key=lambda p: p[0][0])
+        xs = [d[0] * w for d, _ in paired]
+        gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+        med_gap = np.median(gaps) if gaps else 1.0
+
+        worst_idx = None
+        worst_score = -1
+        for i in range(len(paired)):
+            left_gap = gaps[i - 1] if i > 0 else med_gap
+            right_gap = gaps[i] if i < len(gaps) else med_gap
+            max_adj_gap = max(left_gap, right_gap)
+            anomaly = max_adj_gap / (med_gap + 1e-6)
+            conf = paired[i][1]
+            if anomaly > GAP_ANOMALY_RATIO:
+                score = anomaly * (1 - conf)
+                if score > worst_score:
+                    worst_score = score
+                    worst_idx = i
+        if worst_idx is None:
+            break
+        paired.pop(worst_idx)
+    out_d = [d for d, _ in paired]
+    out_c = [c for _, c in paired] if row_confs else None
+    return out_d, out_c
 
 
 def _clamp_bbox(xc: float, yc: float, w: float, h: float) -> Tuple[float, float, float, float]:
@@ -88,30 +135,39 @@ def _refine_row(
     h: int,
     n_slots: int,
     max_gap_ratio: float = 1.8,
+    verify_fp: bool = True,
 ) -> List[Tuple[float, float, float, float]]:
     """
     Refine one row to exactly n_slots positions.
-    - If len < n_slots: interpolate missing from gaps (large gap = missing pin between)
-    - If len > n_slots: keep top n_slots by confidence
+    - FN (len < n_slots): interpolate missing from gaps (large gap = missing pin)
+    - FP (len > n_slots): first verify wrong-location FP, then keep top n_slots by confidence
+    - verify_fp: remove detections in wrong location (spacing anomaly) before capping
     """
     if not row_dets:
         return []
 
-    # Sort by x
     paired = list(zip(row_dets, row_confs or [1.0] * len(row_dets)))
     paired.sort(key=lambda p: p[0][0])
     sorted_dets = [p[0] for p in paired]
     sorted_confs = [p[1] for p in paired]
 
+    # FP path: verify wrong-location first, then cap by confidence
     if len(sorted_dets) > n_slots:
-        # FP: keep top n_slots by confidence
-        idx = np.argsort([-c for c in sorted_confs])[:n_slots]
-        return [sorted_dets[i] for i in sorted(idx)]
+        if verify_fp:
+            sorted_dets, sorted_confs = _verify_and_remove_fp_wrong_location(
+                sorted_dets, sorted_confs, w, n_slots
+            )
+        if len(sorted_dets) > n_slots:
+            idx = np.argsort([-c for c in sorted_confs])[:n_slots]
+            return [sorted_dets[i] for i in sorted(idx)]
+        if len(sorted_dets) == n_slots:
+            return sorted_dets
+        # After FP removal, might have FN - fall through to interpolate
 
     if len(sorted_dets) == n_slots:
         return sorted_dets
 
-    # FN: interpolate missing. Find large gaps and insert.
+    # FN path: interpolate missing
     xs = [d[0] * w for d in sorted_dets]
     ys = [d[1] * h for d in sorted_dets]
     bw = np.mean([d[2] * w for d in sorted_dets]) if sorted_dets else 12
@@ -139,7 +195,6 @@ def _refine_row(
         if not inserted:
             break
 
-    # If still missing (e.g. at ends), extend uniformly
     while len(out_x) < n_slots and len(out_x) >= 2:
         dx = out_x[1] - out_x[0]
         out_x.insert(0, out_x[0] - dx)
@@ -155,7 +210,6 @@ def _refine_row(
         if n_missing <= 0:
             break
 
-    # Convert back to normalized (xc, yc, w, h), clamp to valid range
     result = []
     for x, y in zip(out_x[:n_slots], out_y[:n_slots]):
         xc = x / w
@@ -174,10 +228,8 @@ def _template_row_from_other(
 ) -> List[Tuple[float, float, float, float]]:
     """Generate template row from other row's x spacing when this row is empty."""
     if not other_row or len(other_row) < 2:
-        # Fallback: uniform x across image
         xs = [X_MIN_VALID + i * (X_MAX_VALID - X_MIN_VALID) / (n_per_row - 1) for i in range(n_per_row)]
-        bw = 0.02
-        bh = 0.01
+        bw, bh = 0.02, 0.01
         return [_clamp_bbox(x, target_y, bw, bh) for x in xs]
     sorted_other = sorted(other_row, key=lambda d: d[0])
     xs = [d[0] for d in sorted_other[:n_per_row]]
@@ -197,23 +249,21 @@ def refine_to_fixed_grid(
     h: int,
     n_per_row: int = 20,
     mid_y: float = 0.5,
-    min_per_row_for_interp: int = 8,
+    min_per_row_for_interp: int = 4,
+    verify_fp_location: bool = True,
 ) -> List[Tuple[float, float, float, float]]:
     """
     Refine detections to exactly n_per_row * 2 (upper + lower).
-    Uses geometry: uniform spacing, interpolate FN, cap FP.
-    Applies: Y-band filter, outlier removal, bounds clamp, empty-row template.
+    Auxiliary: FN → interpolate, FP → verify wrong location then cap by confidence.
+    Applies: Y-band filter, outlier removal, FP verification, bounds clamp, empty-row template.
     """
-    # Pre-filter: Y band (remove out-of-range detections), optional outlier removal
     upper_raw, lower_raw, uc_raw, lc_raw = split_upper_lower(detections, confidences, mid_y)
     upper_f, uc_f = _filter_by_y_band(upper_raw, uc_raw, upper=True)
     lower_f, lc_f = _filter_by_y_band(lower_raw, lc_raw, upper=False)
-    # Fallback: if filter removed all, use raw (avoid over-filtering)
     if not upper_f:
         upper_f, uc_f = upper_raw, uc_raw
     if not lower_f:
         lower_f, lc_f = lower_raw, lc_raw
-    # Outlier removal: only when many detections (avoid removing valid edge pins)
     if len(upper_f) >= 12:
         upper_f, uc_f = _remove_y_outliers(upper_f, uc_f)
     if len(lower_f) >= 12:
@@ -221,7 +271,6 @@ def refine_to_fixed_grid(
 
     def _safe_refine(row_dets, row_confs, is_upper):
         if not row_dets:
-            # Empty row: use template from other row
             other = lower_f if is_upper else upper_f
             ty = 0.2 if is_upper else 0.65
             return _template_row_from_other(other, w, h, n_per_row, ty)
@@ -230,7 +279,10 @@ def refine_to_fixed_grid(
                 paired = sorted(zip(row_dets, row_confs), key=lambda p: -p[1])[:n_per_row]
                 return [_clamp_bbox(d[0], d[1], d[2], d[3]) for d, _ in paired]
             return [_clamp_bbox(d[0], d[1], d[2], d[3]) for d in row_dets]
-        return _refine_row(row_dets, row_confs, w, h, n_per_row)
+        return _refine_row(
+            row_dets, row_confs, w, h, n_per_row,
+            verify_fp=verify_fp_location,
+        )
 
     upper_ref = _safe_refine(upper_f, uc_f, is_upper=True)
     lower_ref = _safe_refine(lower_f, lc_f, is_upper=False)

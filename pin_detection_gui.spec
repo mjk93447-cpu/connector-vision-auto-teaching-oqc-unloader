@@ -4,7 +4,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['ultralytics', 'PIL._tkinter_finder', 'matplotlib']
+hiddenimports = ['ultralytics', 'PIL._tkinter_finder', 'matplotlib', 'pin_detection.debug_log']
 # Bundle yolo26n.pt for offline training (build workflow downloads to models/)
 if Path('models/yolo26n.pt').exists():
     datas.append(('models/yolo26n.pt', 'models'))
@@ -30,6 +30,8 @@ a = Analysis(
         'pytest', 'IPython', 'jupyter', 'notebook', 'sphinx',
         'setuptools',
         'triton', 'onnxruntime', 'onnx',
+        'numpy.f2py.tests',  # requires pytest, not needed for EXE
+        'torch.utils.tensorboard',  # optional, reduces build log noise
     ],
     noarchive=False,
     optimize=0,

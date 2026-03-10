@@ -1,15 +1,14 @@
 """
-ROI Editor GUI: manually draw ROI rectangles per image.
-Shows unmasked (YOLO input) and masked (ground-truth annotation) side by side.
-Saves to roi_map.json: { "stem": [x1, y1, x2, y2] } — stem = unmasked filename stem.
-ROADMAP 10.20, EXE_TEST_FEEDBACK 10.20.2.
+ROI Editor GUI: ROI rectangles, zoom, brush masking, split ROI (upper/lower).
+Shows unmasked (YOLO input) and masked (ground-truth) side by side.
+Saves to roi_map.json. ROADMAP 10.20, 10.24.
 """
 import json
 import tkinter as tk
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 
 from .dataset import IMG_EXTS, _find_masked_pair
 
@@ -18,15 +17,29 @@ try:
 except ImportError:
     import tkinter.ttk as ttk
 
+# Zoom limits
+ZOOM_MIN, ZOOM_MAX = 0.25, 4.0
+ZOOM_STEP = 1.15
+BRUSH_RADIUS = 4
+GREEN_RGB = (0, 255, 0)
+
 
 def load_roi_map(path: Path) -> dict:
-    """Load roi_map.json. Returns {} if missing or invalid."""
+    """Load roi_map.json. Supports [x1,y1,x2,y2] or {upper:[...], lower:[...]}."""
     if not path.exists():
         return {}
     try:
         with open(path) as f:
             data = json.load(f)
-        return {k: list(v) for k, v in data.items() if isinstance(v, (list, tuple)) and len(v) == 4}
+        out = {}
+        for k, v in data.items():
+            if isinstance(v, (list, tuple)) and len(v) == 4:
+                out[k] = list(v)
+            elif isinstance(v, dict) and "upper" in v and "lower" in v:
+                u, l = v.get("upper"), v.get("lower")
+                if isinstance(u, (list, tuple)) and len(u) == 4 and isinstance(l, (list, tuple)) and len(l) == 4:
+                    out[k] = {"upper": list(u), "lower": list(l)}
+        return out
     except Exception:
         return {}
 
@@ -38,6 +51,23 @@ def save_roi_map(path: Path, roi_map: dict) -> None:
         json.dump(roi_map, f, indent=2)
 
 
+def _roi_to_bbox(roi) -> tuple[int, int, int, int] | None:
+    """Convert roi (list or dict) to single bbox for crop. Uses union if split."""
+    if roi is None:
+        return None
+    if isinstance(roi, (list, tuple)) and len(roi) == 4:
+        return tuple(roi)
+    if isinstance(roi, dict) and "upper" in roi and "lower" in roi:
+        u = roi["upper"]
+        l = roi["lower"]
+        x1 = min(u[0], l[0])
+        y1 = min(u[1], l[1])
+        x2 = max(u[2], l[2])
+        y2 = max(u[3], l[3])
+        return (x1, y1, x2, y2)
+    return None
+
+
 def run_roi_editor(
     unmasked_dir: str | Path,
     masked_dir: str | Path,
@@ -47,14 +77,10 @@ def run_roi_editor(
 ) -> None:
     """
     Open ROI Editor window.
-    - unmasked_dir, masked_dir: image folders (paired by filename)
-    - output_dir: where to save roi_map.json (output_dir/roi_map.json)
-    - on_save: callback(path) when user saves
-
-    Shows unmasked (left) and masked (right) side by side.
-    ROI is drawn on unmasked — YOLO input (where to find pins).
-    Masked provides ground-truth annotations (how to mask).
-    Same ROI coordinates apply to both (identical dimensions).
+    - Zoom: MouseWheel to zoom in/out
+    - Rectangle: drag on left to set ROI
+    - Brush: paint on right (masked) to mark pins (green)
+    - Split ROI: Upper ROI / Lower ROI for 20+20 pins with different lighting
     """
     unmasked_dir = Path(unmasked_dir)
     masked_dir = Path(masked_dir)
@@ -66,28 +92,36 @@ def run_roi_editor(
         key=lambda p: p.name,
     )
     if not u_files:
-        return  # caller should show error
+        return
 
     roi_map = load_roi_map(roi_map_path)
 
     root = tk.Toplevel(parent) if parent else tk.Toplevel()
-    root.title("ROI Editor — Unmasked (YOLO input) | Masked (ground truth) — drag on left to set ROI")
-    root.geometry("1200x700")
-    root.minsize(800, 500)
+    root.title("ROI Editor — Zoom: scroll | Rectangle: drag left | Brush: paint right | Split: Upper/Lower")
+    root.geometry("1280x750")
+    root.minsize(900, 550)
 
-    # Split pane: left = unmasked, right = masked
     paned = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
     paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-    def _make_canvas_frame(label: str) -> tuple[tk.Frame, tk.Canvas]:
+    def _make_canvas_frame(label: str) -> tuple[tk.Frame, tk.Canvas, tk.Frame]:
         f = ttk.LabelFrame(paned, text=label)
         paned.add(f, weight=1)
-        c = tk.Canvas(f, bg="#1a1a1a", highlightthickness=0)
-        c.pack(fill=tk.BOTH, expand=True)
-        return f, c
+        inner = tk.Frame(f)
+        inner.pack(fill=tk.BOTH, expand=True)
+        c = tk.Canvas(inner, bg="#1a1a1a", highlightthickness=0)
+        sb_y = ttk.Scrollbar(inner)
+        sb_x = ttk.Scrollbar(inner, orient=tk.HORIZONTAL)
+        c.config(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        sb_y.config(command=c.yview)
+        sb_x.config(command=c.xview)
+        sb_y.pack(side=tk.RIGHT, fill=tk.Y)
+        sb_x.pack(side=tk.BOTTOM, fill=tk.X)
+        c.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        return f, c, inner
 
-    left_f, canvas_u = _make_canvas_frame("Unmasked (YOLO input — drag here)")
-    right_f, canvas_m = _make_canvas_frame("Masked (ground truth)")
+    left_f, canvas_u, _ = _make_canvas_frame("Unmasked (YOLO input — drag ROI)")
+    right_f, canvas_m, _ = _make_canvas_frame("Masked (ground truth — brush to mark pins)")
 
     # State
     idx = [0]
@@ -95,10 +129,18 @@ def run_roi_editor(
     photo_m = [None]
     scale = [1.0]
     img_size = [0, 0]
+    img_u_pil = [None]
+    img_m_pil = [None]
     rect_u_id = [None]
     rect_m_id = [None]
     drag_start = [None]
     current_roi = [None]
+    mode = ["rect"]
+    split_mode = [False]
+    current_roi_upper = [None]
+    current_roi_lower = [None]
+    brush_active = [False]
+    last_brush_xy = [None]
 
     def _find_masked(u_path: Path) -> Path | None:
         try:
@@ -120,6 +162,59 @@ def run_roi_editor(
             r = (int(x1 * s), int(y1 * s), int(x2 * s), int(y2 * s))
             rect_id_ref[0] = canvas.create_rectangle(*r, outline="lime", width=2)
 
+    def _redraw_at_scale():
+        """Redraw canvases at current scale (for zoom)."""
+        if img_u_pil[0] is None:
+            return
+        new_w = int(img_size[0] * scale[0])
+        new_h = int(img_size[1] * scale[0])
+        img_u_r = img_u_pil[0].resize((new_w, new_h), Image.Resampling.LANCZOS)
+        img_m_r = img_m_pil[0].resize((new_w, new_h), Image.Resampling.LANCZOS)
+        photo_u[0] = ImageTk.PhotoImage(img_u_r)
+        photo_m[0] = ImageTk.PhotoImage(img_m_r)
+        canvas_u.delete("all")
+        canvas_u.create_image(0, 0, anchor=tk.NW, image=photo_u[0])
+        canvas_m.delete("all")
+        canvas_m.create_image(0, 0, anchor=tk.NW, image=photo_m[0])
+        canvas_u.config(scrollregion=(0, 0, new_w, new_h))
+        canvas_m.config(scrollregion=(0, 0, new_w, new_h))
+        s = scale[0]
+        if split_mode[0]:
+            if current_roi_upper[0]:
+                r = current_roi_upper[0]
+                canvas_u.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="cyan", width=2)
+                canvas_m.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="cyan", width=2)
+            if current_roi_lower[0]:
+                r = current_roi_lower[0]
+                canvas_u.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="orange", width=2)
+                canvas_m.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="orange", width=2)
+        elif current_roi[0]:
+            r = current_roi[0]
+            canvas_u.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="lime", width=2)
+            canvas_m.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="lime", width=2)
+
+    def _draw_split_roi():
+        rect_u_id[0] = None
+        rect_m_id[0] = None
+        s = scale[0]
+        if current_roi_upper[0]:
+            r = current_roi_upper[0]
+            canvas_u.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="cyan", width=2)
+            canvas_m.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="cyan", width=2)
+        if current_roi_lower[0]:
+            r = current_roi_lower[0]
+            canvas_u.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="orange", width=2)
+            canvas_m.create_rectangle(int(r[0]*s), int(r[1]*s), int(r[2]*s), int(r[3]*s), outline="orange", width=2)
+
+    def _on_zoom(delta: int, event):
+        old_s = scale[0]
+        new_s = old_s * (ZOOM_STEP ** delta)
+        new_s = max(ZOOM_MIN, min(ZOOM_MAX, new_s))
+        if abs(new_s - old_s) < 0.01:
+            return
+        scale[0] = new_s
+        _redraw_at_scale()
+
     def _load_image():
         u_path = u_files[idx[0]]
         m_path = _find_masked(u_path)
@@ -136,10 +231,11 @@ def run_roi_editor(
             img_m = img_u.copy()
 
         img_size[0], img_size[1] = img_u.size
-        cw = 500  # half width per pane
-        ch = canvas_u.winfo_height() or 400
-        if ch < 10:
-            ch = 400
+        img_u_pil[0] = img_u
+        img_m_pil[0] = img_m
+
+        cw = 550
+        ch = max(canvas_u.winfo_height() or 400, 300)
         rw = cw / img_u.size[0]
         rh = ch / img_u.size[1]
         scale[0] = min(rw, rh, 1.0)
@@ -149,7 +245,9 @@ def run_roi_editor(
         img_u_resized = img_u.resize((new_w, new_h), Image.Resampling.LANCZOS)
         img_m_resized = img_m.resize((new_w, new_h), Image.Resampling.LANCZOS)
         photo_u[0] = ImageTk.PhotoImage(img_u_resized)
+        photo_u[0]._img = img_u_resized
         photo_m[0] = ImageTk.PhotoImage(img_m_resized)
+        photo_m[0]._img = img_m_resized
 
         canvas_u.delete("all")
         canvas_u.create_image(0, 0, anchor=tk.NW, image=photo_u[0])
@@ -160,42 +258,112 @@ def run_roi_editor(
 
         stem = u_path.stem
         roi = roi_map.get(stem)
-        if roi:
-            current_roi[0] = roi
+        if isinstance(roi, dict):
+            split_mode[0] = True
+            current_roi_upper[0] = roi.get("upper")
+            current_roi_lower[0] = roi.get("lower")
+            current_roi[0] = None
+            _draw_split_roi()
+        elif isinstance(roi, (list, tuple)) and len(roi) == 4:
+            split_mode[0] = False
+            current_roi[0] = list(roi)
+            current_roi_upper[0] = None
+            current_roi_lower[0] = None
             _draw_roi_on_canvas(canvas_u, rect_u_id, roi)
             _draw_roi_on_canvas(canvas_m, rect_m_id, roi)
         else:
+            split_mode[0] = False
             rect_u_id[0] = None
             rect_m_id[0] = None
             current_roi[0] = None
+            current_roi_upper[0] = None
+            current_roi_lower[0] = None
 
         pair_info = f" + {m_path.name}" if m_path else " (no masked pair)"
+        mode_txt = "Brush" if mode[0] == "brush" else ("Split ROI" if split_mode[0] else "Rectangle")
         nav_label.config(
-            text=f"Image {idx[0] + 1}/{len(u_files)} — {u_path.name}{pair_info}"
-            + (f"  ROI: {roi}" if roi else "  (drag on left to set ROI)")
+            text=f"Image {idx[0] + 1}/{len(u_files)} — {u_path.name}{pair_info}  |  Mode: {mode_txt}"
         )
 
-    def _on_mouse_down(event, canvas: tk.Canvas):
-        x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
-        if 0 <= x < img_size[0] * scale[0] and 0 <= y < img_size[1] * scale[0]:
-            ix, iy = _display_to_image(x, y)
-            drag_start[0] = (ix, iy)
-            if rect_u_id[0]:
-                canvas_u.delete(rect_u_id[0])
-            if rect_m_id[0]:
-                canvas_m.delete(rect_m_id[0])
-            rect_u_id[0] = canvas_u.create_rectangle(x, y, x, y, outline="lime", width=2)
-            rect_m_id[0] = canvas_m.create_rectangle(x, y, x, y, outline="lime", width=2)
-            current_roi[0] = [ix, iy, ix, iy]
-
-    def _on_mouse_move(event, canvas: tk.Canvas):
-        if drag_start[0] is None:
-            return
+    def _on_mouse_down(event, canvas: tk.Canvas, is_left: bool):
         try:
             x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
         except Exception:
             return
         ix, iy = _display_to_image(x, y)
+        if not (0 <= ix < img_size[0] and 0 <= iy < img_size[1]):
+            return
+
+        if mode[0] == "brush" and not is_left:
+            brush_active[0] = True
+            last_brush_xy[0] = (ix, iy)
+            _apply_brush(ix, iy)
+            return
+
+        if mode[0] == "rect" and is_left:
+            drag_start[0] = (ix, iy)
+            for r in [rect_u_id, rect_m_id]:
+                if r[0]:
+                    canvas_u.delete(r[0])
+                    canvas_m.delete(r[0])
+                    r[0] = None
+            s = scale[0]
+            if split_mode[0]:
+                if current_roi_upper[0] is None:
+                    rect_u_id[0] = canvas_u.create_rectangle(x, y, x, y, outline="cyan", width=2)
+                    rect_m_id[0] = canvas_m.create_rectangle(x, y, x, y, outline="cyan", width=2)
+                else:
+                    rect_u_id[0] = canvas_u.create_rectangle(x, y, x, y, outline="orange", width=2)
+                    rect_m_id[0] = canvas_m.create_rectangle(x, y, x, y, outline="orange", width=2)
+            else:
+                rect_u_id[0] = canvas_u.create_rectangle(x, y, x, y, outline="lime", width=2)
+                rect_m_id[0] = canvas_m.create_rectangle(x, y, x, y, outline="lime", width=2)
+            current_roi[0] = [ix, iy, ix, iy]
+
+    def _apply_brush(ix: int, iy: int):
+        if img_m_pil[0] is None:
+            return
+        draw = ImageDraw.Draw(img_m_pil[0])
+        rad = BRUSH_RADIUS
+        draw.ellipse((ix - rad, iy - rad, ix + rad, iy + rad), fill=GREEN_RGB, outline=GREEN_RGB)
+        new_w = int(img_size[0] * scale[0])
+        new_h = int(img_size[1] * scale[0])
+        img_m_resized = img_m_pil[0].resize((new_w, new_h), Image.Resampling.LANCZOS)
+        photo_m[0] = ImageTk.PhotoImage(img_m_resized)
+        canvas_m.delete("all")
+        canvas_m.create_image(0, 0, anchor=tk.NW, image=photo_m[0])
+        s = scale[0]
+        if split_mode[0]:
+            if current_roi_upper[0]:
+                box = current_roi_upper[0]
+                canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="cyan", width=2)
+            if current_roi_lower[0]:
+                box = current_roi_lower[0]
+                canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="orange", width=2)
+        elif current_roi[0]:
+            box = current_roi[0]
+            canvas_m.create_rectangle(int(box[0]*s), int(box[1]*s), int(box[2]*s), int(box[3]*s), outline="lime", width=2)
+
+    def _on_mouse_move(event, canvas: tk.Canvas, is_left: bool):
+        try:
+            x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
+        except Exception:
+            return
+        ix, iy = _display_to_image(x, y)
+
+        if brush_active[0] and not is_left:
+            if last_brush_xy[0]:
+                lx, ly = last_brush_xy[0]
+                steps = max(1, int(((ix - lx) ** 2 + (iy - ly) ** 2) ** 0.5 / 2))
+                for i in range(1, steps + 1):
+                    tx = int(lx + (ix - lx) * i / steps)
+                    ty = int(ly + (iy - ly) * i / steps)
+                    _apply_brush(tx, ty)
+            last_brush_xy[0] = (ix, iy)
+            return
+
+        if drag_start[0] is None:
+            return
         x1, y1 = drag_start[0][0], drag_start[0][1]
         s = scale[0]
         r = (int(min(x1, ix) * s), int(min(y1, iy) * s), int(max(x1, ix) * s), int(max(y1, iy) * s))
@@ -206,28 +374,80 @@ def run_roi_editor(
         current_roi[0] = [min(x1, ix), min(y1, iy), max(x1, ix), max(y1, iy)]
 
     def _on_mouse_up(event):
+        if brush_active[0]:
+            brush_active[0] = False
+            last_brush_xy[0] = None
+            _save_masked_image()
+            return
         if drag_start[0] is None:
             return
         stem = u_files[idx[0]].stem
-        if current_roi[0]:
+        if split_mode[0]:
+            if current_roi_upper[0] is None and current_roi[0]:
+                x1, y1, x2, y2 = current_roi[0]
+                if abs(x2 - x1) > 4 and abs(y2 - y1) > 4:
+                    current_roi_upper[0] = [x1, y1, x2, y2]
+            elif current_roi_lower[0] is None and current_roi[0]:
+                x1, y1, x2, y2 = current_roi[0]
+                if abs(x2 - x1) > 4 and abs(y2 - y1) > 4:
+                    current_roi_lower[0] = [x1, y1, x2, y2]
+                    roi_map[stem] = {"upper": current_roi_upper[0], "lower": current_roi_lower[0]}
+        elif current_roi[0]:
             x1, y1, x2, y2 = current_roi[0]
             if abs(x2 - x1) > 4 and abs(y2 - y1) > 4:
                 roi_map[stem] = [x1, y1, x2, y2]
         drag_start[0] = None
 
-    canvas_u.bind("<ButtonPress-1>", lambda e: _on_mouse_down(e, canvas_u))
-    canvas_u.bind("<B1-Motion>", lambda e: _on_mouse_move(e, canvas_u))
-    canvas_m.bind("<B1-Motion>", lambda e: _on_mouse_move(e, canvas_m))
+    def _save_masked_image():
+        m_path = _find_masked(u_files[idx[0]])
+        if m_path and img_m_pil[0] is not None:
+            try:
+                img_m_pil[0].save(m_path)
+            except Exception:
+                pass
+
+    canvas_u.bind("<ButtonPress-1>", lambda e: _on_mouse_down(e, canvas_u, True))
+    canvas_u.bind("<B1-Motion>", lambda e: _on_mouse_move(e, canvas_u, True))
+    canvas_m.bind("<ButtonPress-1>", lambda e: _on_mouse_down(e, canvas_m, False))
+    canvas_m.bind("<B1-Motion>", lambda e: _on_mouse_move(e, canvas_m, False))
     root.bind("<ButtonRelease-1>", _on_mouse_up)
+    canvas_u.bind("<MouseWheel>", lambda e: _on_zoom(1 if e.delta > 0 else -1, e))
+    canvas_m.bind("<MouseWheel>", lambda e: _on_zoom(1 if e.delta > 0 else -1, e))
     root.bind("<Left>", lambda e: _go(-1))
     root.bind("<Right>", lambda e: _go(1))
 
     def _go(delta: int):
+        _save_masked_image()
         idx[0] = (idx[0] + delta) % len(u_files)
         _load_image()
 
+    def _set_mode(m: str):
+        mode[0] = m
+        nav_label.config(text=nav_label.cget("text").split("|")[0] + f"  |  Mode: {m}")
+
+    def _toggle_split():
+        split_mode[0] = not split_mode[0]
+        if not split_mode[0]:
+            stem = u_files[idx[0]].stem
+            if isinstance(roi_map.get(stem), dict):
+                bbox = _roi_to_bbox(roi_map[stem])
+                if bbox:
+                    roi_map[stem] = list(bbox)
+            current_roi_upper[0] = None
+            current_roi_lower[0] = None
+        _load_image()
+
     def _save():
-        save_roi_map(roi_map_path, roi_map)
+        _save_masked_image()
+        to_save = {}
+        for k, v in roi_map.items():
+            if isinstance(v, dict) and "upper" in v and "lower" in v:
+                u, l = v.get("upper"), v.get("lower")
+                if isinstance(u, (list, tuple)) and len(u) == 4 and isinstance(l, (list, tuple)) and len(l) == 4:
+                    to_save[k] = v
+            elif isinstance(v, (list, tuple)) and len(v) == 4:
+                to_save[k] = list(v)
+        save_roi_map(roi_map_path, to_save)
         if on_save:
             on_save(roi_map_path)
         from tkinter import messagebox
@@ -236,16 +456,12 @@ def run_roi_editor(
     def _clear_current():
         stem = u_files[idx[0]].stem
         roi_map.pop(stem, None)
-        if rect_u_id[0]:
-            canvas_u.delete(rect_u_id[0])
-            rect_u_id[0] = None
-        if rect_m_id[0]:
-            canvas_m.delete(rect_m_id[0])
-            rect_m_id[0] = None
+        rect_u_id[0] = None
+        rect_m_id[0] = None
         current_roi[0] = None
-        nav_label.config(
-            text=f"Image {idx[0] + 1}/{len(u_files)} — {u_files[idx[0]].name}  (ROI cleared, drag on left to set)"
-        )
+        current_roi_upper[0] = None
+        current_roi_lower[0] = None
+        _load_image()
 
     nav_f = tk.Frame(root)
     nav_f.pack(fill=tk.X, padx=8, pady=4)
@@ -253,7 +469,10 @@ def run_roi_editor(
     ttk.Button(nav_f, text="Next", command=lambda: _go(1)).pack(side=tk.LEFT, padx=4)
     nav_label = tk.Label(nav_f, text="", font=("Segoe UI", 10))
     nav_label.pack(side=tk.LEFT, padx=12)
-    tk.Label(nav_f, text="(Left/Right keys)", font=("Segoe UI", 8), foreground="gray").pack(side=tk.LEFT)
+    tk.Label(nav_f, text="(Left/Right keys | Scroll: zoom)", font=("Segoe UI", 8), fg="gray").pack(side=tk.LEFT, padx=4)
+    ttk.Button(nav_f, text="Rectangle", command=lambda: _set_mode("rect")).pack(side=tk.LEFT, padx=2)
+    ttk.Button(nav_f, text="Brush", command=lambda: _set_mode("brush")).pack(side=tk.LEFT, padx=2)
+    ttk.Button(nav_f, text="Split ROI", command=_toggle_split).pack(side=tk.LEFT, padx=2)
     ttk.Button(nav_f, text="Clear ROI", command=_clear_current).pack(side=tk.RIGHT, padx=4)
     ttk.Button(nav_f, text="Save ROI map", command=_save).pack(side=tk.RIGHT, padx=4)
 

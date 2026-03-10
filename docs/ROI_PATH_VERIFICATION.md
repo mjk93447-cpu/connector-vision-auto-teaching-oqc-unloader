@@ -51,7 +51,10 @@ if not roi_map_path.exists():
 - `tests/test_gui_10_20.py`: test_dataset_roi_map_integration, test_dataset_roi_map_from_file, test_add_one_pair_with_roi
 - `tools_scripts/test_exe_large_train.py`: roi_map 복사 후 학습 정상 완료
 - `tools_scripts/verify_roi_path.py`: 경로 일관성 검증 스크립트
+  - CI: pin_large_factory 우선 사용 (Generate large factory 단계 후 실행)
+  - 로컬: pin_large_factory 또는 pin_synthetic fallback
 
 ## Changelog
 
+- 2025-03-05: pin_large_factory fallback 추가, CI SKIP 제거
 - 2025-03-05: 초안 작성, ROI 전달 경로 문서화
