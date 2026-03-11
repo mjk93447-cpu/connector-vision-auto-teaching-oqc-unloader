@@ -10,6 +10,7 @@ on:
       - "requirements-pin.txt"
       - "pin_detection_gui.spec"
       - "tools_scripts/**"
+      - "docs/**"
       - ".github/workflows/build-pin-exe.yml"
     tags:
       - "pin-v*"
@@ -74,18 +75,26 @@ jobs:
       - name: Build EXE
         run: python -m PyInstaller --noconfirm --log-level WARN pin_detection_gui.spec
 
+      - name: Prepare release artifact (EXE + manual)
+        run: |
+          New-Item -ItemType Directory -Force -Path release_artifact
+          Copy-Item dist\pin_detection_gui.exe release_artifact\
+          Copy-Item docs\REAL_FACTORY_DATA_TEST_MANUAL_EN.md release_artifact\
+
       - name: Upload artifact
         if: "!startsWith(github.ref, 'refs/tags/')"
         uses: actions/upload-artifact@v4
         with:
           name: pin_detection_gui_windows
-          path: dist/pin_detection_gui.exe
+          path: release_artifact/
 
       - name: Create Release and upload EXE
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/pin_detection_gui.exe
+          files: |
+            release_artifact/pin_detection_gui.exe
+            release_artifact/REAL_FACTORY_DATA_TEST_MANUAL_EN.md
           generate_release_notes: false
           body: "Pin Detection GUI (YOLO26) - Prototype. Tag: ${{ github.ref_name }}"
         env:
